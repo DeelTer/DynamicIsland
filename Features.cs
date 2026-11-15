@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -209,6 +209,20 @@ sealed partial class IslandApp
     });
 
     static System.Media.SoundPlayer? alarm;
+    static System.Media.SoundPlayer? startCue;
+
+    static void PlayStartCue(string file)
+    {
+        try
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "sounds", file);
+            if (!File.Exists(path)) return;
+            startCue?.Dispose();
+            startCue = new System.Media.SoundPlayer(path);
+            startCue.Play();
+        }
+        catch (Exception) { }
+    }
 
     static void PlayTimerSound()
     {
@@ -222,13 +236,14 @@ sealed partial class IslandApp
 
     void StartTimer(double minutes)
     {
-        if (minutes is < 1.0 / 60 or > 7 * 1440) return;
+        if (!double.IsFinite(minutes) || minutes is < 1.0 / 60 or > 7 * 1440) return;
         StopTimerSound();
         timerTotal = TimeSpan.FromMinutes(minutes);
         timerEnd = DateTimeOffset.Now + timerTotal;
         timerPaused = TimeSpan.Zero;
         timerDone = null;
         PushTimer();
+        if (shownMonitor > 0) PlayStartCue("timer-start.wav");
     }
 
     void TimerCommand(string command, double minutes)
@@ -316,6 +331,7 @@ sealed partial class IslandApp
                 recorder = mic;
                 recordingStarted = DateTimeOffset.Now;
                 PushRec();
+                if (shownMonitor > 0) PlayStartCue("recording-start.wav");
             }
             else
             {
