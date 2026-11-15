@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+publish/
+*.user
+.vs/
+.vscode/
+.idea/
+
+# Speech model (141 MB, over GitHub's 100 MB limit) — fetch with scripts/get-model.ps1
+assets/speech/ggml-*.bin
+
+# Local tooling
+.claude/
+island.log
