@@ -13,3 +13,6 @@ assets/speech/ggml-*.bin
 # Local tooling
 .claude/
 island.log
+
+# Release builds (upload the zip to GitHub Releases)
+release/

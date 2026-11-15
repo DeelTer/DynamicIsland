@@ -80,6 +80,24 @@ internal static class Native
         keybd_event(key, 0, 2, 0);
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct GuiThreadInfo { public int Size; public uint Flags; public nint Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
+    [DllImport("user32")] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
+
+    /// True when the window's UI thread shows a text caret (classic edits, many native apps).
+    internal static bool HasCaret(nint window)
+    {
+        var info = new GuiThreadInfo { Size = Marshal.SizeOf<GuiThreadInfo>() };
+        return GetGUIThreadInfo(GetWindowThreadProcessId(window, out _), ref info) && (info.Caret != 0 || (info.Flags & 1) != 0);
+    }
+
+    /// Hotkey chords leave Ctrl/Alt/Shift held; a synthetic Ctrl+V must wait until they are released.
+    internal static async System.Threading.Tasks.Task ModifiersUp()
+    {
+        for (int i = 0; i < 40 && ((GetAsyncKeyState(0x11) | GetAsyncKeyState(0x12) | GetAsyncKeyState(0x10)) & 0x8000) != 0; i++)
+            await System.Threading.Tasks.Task.Delay(40);
+    }
+
     internal static void Paste()
     {
         keybd_event(0x11, 0, 0, 0);

@@ -295,6 +295,21 @@ function batteryHtml() {
   const color = b.charging ? 'var(--green)' : p < 12 ? 'var(--red)' : 'var(--ink)';
   return `<span style="color:${color};display:flex">${ic(name, 20)}</span><span class="num">${p}%</span>`;
 }
+// Live microphone waveform: native sends a 0..1 loudness ~20×/s; bars scroll right-to-left.
+const vlevels = new Array(40).fill(0);
+const vwave = n => `<span class="vwave" data-n="${n}">${'<i></i>'.repeat(n)}</span>`;
+function pushLevel(v) {
+  vlevels.push(v); vlevels.shift();
+  for (const w of document.querySelectorAll('.vwave')) {
+    const bars = w.children, n = bars.length;
+    for (let i = 0; i < n; i++) {
+      const l = vlevels[vlevels.length - n + i];
+      // a little shimmer so silence still reads as "listening"
+      bars[i].style.transform = `scaleY(${(0.14 + l * 0.86 + Math.random() * 0.05).toFixed(3)})`;
+    }
+  }
+}
+
 const bars = (color, paused) => `<span class="bars ${paused ? 'paused' : ''}" style="color:${color}"><i></i><i></i><i></i><i></i><i></i></span>`;
 
 function renderCompact() {
@@ -306,7 +321,7 @@ function renderCompact() {
      <span class="time" style="color:var(--orange)">Время вышло</span>
      <div class="side"><button class="stop ok" data-act="ack" title="Готово">${ic('check', 13)}</button></div>`;
   else if (a === 'rec') html =
-    `<div class="side" style="color:var(--red)">${ic('microphone:fill', 17)}${bars('var(--red)')}</div>
+    `<div class="side" style="color:var(--red)">${ic('microphone:fill', 17)}${vwave(7)}</div>
      <span class="time num" style="color:#ff6961" data-k="rec"></span>
      <div class="side"><button class="stop" data-act="voice" title="Остановить">${ic('stop:fill', 12)}</button></div>`;
   else if (a === 'busy') html =
@@ -488,6 +503,7 @@ function mediaHtml() {
     `<div class="cover" style="display:grid;place-items:center;background:linear-gradient(135deg,${S.artColor},#222)">${ic('music-notes', 44)}</div>`;
   return `<div class="tile media ${m.playing ? '' : 'paused'}" data-key="${esc(m.key)}">
       ${S.art ? `<div class="backdrop" style="background-image:url('${S.art}')"></div>` : ''}
+      <button class="aout" data-act="audioList" title="Куда выводить звук">${ic('speaker-high', 17)}</button>
       ${cover}
       <div class="meta">
         <div class="src">${esc(m.source)}</div>
@@ -515,7 +531,8 @@ function homeHtml() {
       ${tool('selection', 'Область', 'snip')}
       ${tool('monitor', 'Весь экран', 'fullshot')}
       ${tool('eyedropper', 'Пипетка', 'pick')}
-      ${tool(rec ? 'stop:fill' : busy ? 'waveform' : 'microphone', rec ? 'Стоп' : busy ? 'Распознаю…' : 'Диктовка', 'voice', rec)}
+      ${rec ? `<button class="tool live rec" data-act="voice" title="Остановить и распознать">${ic('stop:fill', 22)}<span class="num" data-k="rec">0:00</span>${vwave(16)}</button>`
+        : tool(busy ? 'waveform' : 'microphone', busy ? 'Распознаю…' : 'Диктовка', 'voice', false)}
       ${tool('currency-circle-dollar', 'Валюты', 'tab:fx')}
       ${tool('clipboard-text', 'Буфер', 'tab:clip')}
     </div>
@@ -646,6 +663,24 @@ function parseDuration(text) {
   }
   return found ? total : 0;
 }
+
+// ------------------------------------------------------------------ audio output popover
+function showAudio(list) {
+  const page = $('#page'), card = $('.media');
+  $('#apop')?.remove();
+  if (!page || !card || mode !== 'panel' || tab !== 'home') return;
+  const pop = document.createElement('div');
+  pop.id = 'apop'; pop.className = 'apop';
+  const icon = n => /науш|headphone|headset|airpods|buds|гарнит/i.test(n) ? 'headphones' : 'speaker-high';
+  pop.innerHTML = list.length ? list.map(d => `<button class="aopt ${d.on ? 'on' : ''}" data-act="audioSet" data-id="${esc(d.id)}" data-name="${esc(d.name)}">
+      ${ic(icon(d.name), 18)}<span>${esc(d.name)}</span>${d.on ? ic('check', 16) : ''}</button>`).join('')
+    : '<div class="aopt">Устройства не найдены</div>';
+  const r = card.getBoundingClientRect(), p = page.getBoundingClientRect();
+  pop.style.left = (r.right - p.left - 300) + 'px';
+  pop.style.top = (r.top - p.top + 44) + 'px';
+  page.appendChild(pop);
+}
+document.addEventListener('pointerdown', e => { if (!e.target.closest?.('#apop, .aout')) $('#apop')?.remove(); }, true);
 
 // ------------------------------------------------------------------ currency converter
 // Rates: Coinbase, units per 1 USD (fiat + crypto). Type into any row — every other row follows.
@@ -919,6 +954,11 @@ function act(name, el, e) {
     case 'ack': ackTimer(); break;
     case 'pin': pinned = !pinned; el.classList.toggle('on', pinned); el.innerHTML = ic(pinned ? 'push-pin:fill' : 'push-pin', 19); break;
     case 'menu': post({ t: 'menu' }); break;
+    case 'audioList':
+      e?.stopPropagation();
+      if ($('#apop')) $('#apop').remove(); else post({ t: 'audioList' });
+      break;
+    case 'audioSet': post({ t: 'audioSet', id: el.dataset.id }); $('#apop')?.remove(); flash('Звук → ' + el.dataset.name); break;
     case 'fxAdd': case 'fxClose': case 'fxPick': case 'fxRemove': case 'fxRefresh':
       e?.preventDefault(); e?.stopPropagation(); fxAct(cmd, el); break;
     case 'shelfRemove': e.stopPropagation(); post({ t: 'shelfRemove', id: el.dataset.id }); break;
@@ -1240,6 +1280,8 @@ function onNative(m) {
       try { FX.rates = JSON.parse(m.json); FX.at = m.at; FX.error = false; } catch { }
       if (mode === 'panel' && tab === 'fx') { if (FX.picker || typing()) fxFill(document.activeElement); else renderPage(false); }
       break;
+    case 'lvl': pushLevel(m.v); break;
+    case 'audio': showAudio(m.list); break;
     case 'ratesError': FX.error = true; if (mode === 'panel' && tab === 'fx' && !typing() && !FX.picker) renderPage(false); break;
     case 'toast': showToast(m); break;
     case 'flash': flash(m.text); break;

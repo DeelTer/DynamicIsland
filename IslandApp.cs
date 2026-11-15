@@ -47,6 +47,7 @@ sealed partial class IslandApp : ApplicationContext
         if (!Native.RegisterHotKey(island.Handle, 1, 0x4003, 0x49))
             tray.ShowBalloonTip(2500, "Island", "Ctrl+Alt+I уже занято. Откройте Island из трея.", ToolTipIcon.Info);
         Native.RegisterHotKey(island.Handle, 2, 0x4003, 0x56);
+        Native.RegisterHotKey(island.Handle, 3, 0x4003, 0x44); // Ctrl+Alt+D: dictate into the focused field
         homeMonitor = FindMonitor(state.AnchorMonitor);
         ConfigureTray();
         tick.Tick += (_, _) => Tick();
@@ -258,6 +259,7 @@ sealed partial class IslandApp : ApplicationContext
         {
             if (wParam == 1) { island.Send(new { t = "toggle" }); Native.SetForegroundWindow(island.Handle); island.FocusPage(); }
             else if (wParam == 2) ShowClipboard();
+            else if (wParam == 3) VoiceHotkey();
             return true;
         }
         if (message == 0x31D) { island.BeginInvoke(Capture); return true; }
@@ -277,6 +279,11 @@ sealed partial class IslandApp : ApplicationContext
             case "dragStart": StartDrag(); break;
             case "volume": Native.MediaKey(m.GetProperty("dir").GetInt32() > 0 ? (byte)0xAF : (byte)0xAE); break;
             case "pasteLast": PasteLast(); break;
+            case "audioList": PushAudio(); break;
+            case "audioSet":
+                try { AudioDevices.SetDefault(Str(m, "id")); } catch (Exception) { Toast("error", "Не удалось переключить", "", "warning-circle", "#ff6b6b"); }
+                PushAudio();
+                break;
             case "fxRefresh": _ = RefreshRates(true); break;
             case "fxPrefs": state = state with { Fx = m.GetProperty("v").GetString() }; Save(); break;
             case "shelfClearOld":
@@ -287,7 +294,7 @@ sealed partial class IslandApp : ApplicationContext
             case "panel":
                 bool panelOpen = m.GetProperty("open").GetBoolean();
                 leanAt = panelOpen ? DateTimeOffset.MaxValue : DateTimeOffset.Now.AddSeconds(15);
-                if (panelOpen) island.Lean(false);
+                if (panelOpen) { island.Lean(false); if (recorder == null && !voiceBusy) _ = CaptureDictationTarget(); }
                 break;
             case "focus": Native.SetForegroundWindow(island.Handle); break;
             case "timerAck": StopTimerSound(); timerDone = null; PushTimer(); break;

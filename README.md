@@ -1,4 +1,4 @@
-# Island
+﻿# Island
 
 A Dynamic Island–style widget for the top edge of a Windows screen.
 
@@ -54,6 +54,8 @@ User data (settings, clipboard history, shelf files) is stored in `%LOCALAPPDATA
 |---|---|
 | Ctrl+Alt+I | Open / close the island |
 | Ctrl+Alt+V | Clipboard history |
+| Ctrl+Alt+D | Dictation into the focused text field |
 | Wheel over the pill | System volume |
 | Middle click on the pill | Play / pause |
 | Right click on the pill | Paste the last clipboard entry |
+

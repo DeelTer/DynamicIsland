@@ -257,12 +257,40 @@ sealed partial class IslandApp
 
     // ---------------------------------------------------------------- dictation
 
-    MediaCapture? recorder;
-    StorageFile? recordingFile;
+    Mic? recorder;
+    string? recordingPath;
     bool voiceBusy;
     DateTimeOffset recordingStarted;
+    long levelSentAt;
+
+    // Where dictated text goes: the window (and whether it had a text field focused) captured
+    // while that app still had focus — when the panel opened or the hotkey was pressed.
+    nint dictTarget;
+    bool dictEditable;
+    DateTimeOffset dictTargetAt;
 
     void PushRec() => Patch("rec", new { state = recorder != null ? "rec" : voiceBusy ? "busy" : "off", startedAt = recordingStarted.ToUnixTimeMilliseconds() });
+
+    /// Remembers the foreground app and whether its focused element accepts typing.
+    async Task CaptureDictationTarget()
+    {
+        var window = Native.GetForegroundWindow();
+        if (window == 0 || window == island.Handle) return;
+        bool editable = Native.HasCaret(window) || await Task.Run(FocusedIsEditable);
+        dictTarget = window; dictEditable = editable; dictTargetAt = DateTimeOffset.Now;
+    }
+
+    static bool FocusedIsEditable()
+    {
+        try { return Uia.FocusedIsEditable(); }
+        catch (Exception) { return false; }
+    }
+
+    async void VoiceHotkey()
+    {
+        if (recorder == null && !voiceBusy) await CaptureDictationTarget();
+        ToggleVoice();
+    }
 
     async void ToggleVoice()
     {
@@ -271,37 +299,44 @@ sealed partial class IslandApp
         {
             if (recorder == null)
             {
-                voiceBusy = true;
                 string engine = Path.Combine(AppContext.BaseDirectory, "speech", "whisper-cli.exe");
-                if (!File.Exists(engine)) { Toast("error", "Нет распознавания речи", "Отсутствует папка speech", "warning-circle", "#ff6b6b"); return; }
+                if (!File.Exists(engine) || !File.Exists(Path.Combine(AppContext.BaseDirectory, "speech", "ggml-base.bin")))
+                { Toast("error", "Нет распознавания речи", "Не найдена модель в папке speech", "warning-circle", "#ff6b6b"); return; }
+                if (DateTimeOffset.Now - dictTargetAt > TimeSpan.FromMinutes(2) || !Native.IsWindow(dictTarget)) dictTarget = 0;
                 Directory.CreateDirectory(Store.Folder);
-                string path = Path.Combine(Store.Folder, "dictation-" + Guid.NewGuid().ToString("N") + ".wav");
-                File.WriteAllBytes(path, []);
-                recordingFile = await StorageFile.GetFileFromPathAsync(path);
-                var capture = new MediaCapture();
-                try
+                recordingPath = Path.Combine(Store.Folder, "dictation-" + Guid.NewGuid().ToString("N") + ".wav");
+                var mic = new Mic(recordingPath);
+                mic.Level += level =>
                 {
-                    await capture.InitializeAsync(new MediaCaptureInitializationSettings { StreamingCaptureMode = StreamingCaptureMode.Audio });
-                    var profile = MediaEncodingProfile.CreateWav(AudioEncodingQuality.Low);
-                    profile.Audio = AudioEncodingProperties.CreatePcm(16000, 1, 16);
-                    await capture.StartRecordToStorageFileAsync(profile, recordingFile);
-                    recorder = capture;
-                    recordingStarted = DateTimeOffset.Now;
-                }
-                catch { capture.Dispose(); throw; }
-                voiceBusy = false;
+                    long now = Environment.TickCount64;
+                    if (now - levelSentAt < 45) return;
+                    levelSentAt = now;
+                    island.BeginInvoke(() => island.Send(new { t = "lvl", v = Math.Round(level, 3) }));
+                };
+                recorder = mic;
+                recordingStarted = DateTimeOffset.Now;
                 PushRec();
             }
             else
             {
-                var capture = recorder;
+                var mic = recorder;
                 recorder = null;
                 voiceBusy = true;
                 PushRec();
-                await capture.StopRecordAsync();
-                capture.Dispose();
-                string text = await Transcribe(recordingFile!.Path);
-                if (!string.IsNullOrWhiteSpace(text))
+                await Task.Run(mic.Stop);
+                mic.Dispose();
+                string text = await Transcribe(recordingPath!);
+                if (!string.IsNullOrWhiteSpace(text) && dictEditable && dictTarget != 0 && Native.IsWindow(dictTarget))
+                {
+                    // Paste where the caret was; the text also stays in the clipboard.
+                    CopyText(text, false);
+                    Native.SetForegroundWindow(dictTarget);
+                    await Native.ModifiersUp();
+                    await Task.Delay(120);
+                    Native.Paste();
+                    Toast("voice", text, "Вставлено в " + Native.ProcessName(dictTarget), "microphone", "#34d399", [Act("tab:note", null, "arrow-square-out")], ms: 4000);
+                }
+                else if (!string.IsNullOrWhiteSpace(text))
                 {
                     state = state with { Note = string.IsNullOrWhiteSpace(state.Note) ? text : state.Note.TrimEnd() + Environment.NewLine + text };
                     Save();
@@ -326,7 +361,7 @@ sealed partial class IslandApp
             if (recorder == null)
             {
                 voiceBusy = false;
-                if (recordingFile != null) { try { File.Delete(recordingFile.Path); } catch (Exception) { } recordingFile = null; }
+                if (recordingPath != null) { try { File.Delete(recordingPath); } catch (Exception) { } recordingPath = null; }
             }
             PushRec();
         }
@@ -337,7 +372,9 @@ sealed partial class IslandApp
         string speech = Path.Combine(AppContext.BaseDirectory, "speech");
         var info = new ProcessStartInfo(Path.Combine(speech, "whisper-cli.exe"))
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true, WorkingDirectory = speech };
-        foreach (string argument in new[] { "-m", Path.Combine(speech, "ggml-base.bin"), "-f", path, "-l", "ru", "-otxt", "-of", path, "-nt", "-t", "4" })
+        foreach (string argument in new[] { "-m", Path.Combine(speech, "ggml-base.bin"), "-f", path, "-l", "ru", "-otxt", "-of", path, "-nt", "-t", "4",
+            // A punctuated example steers whisper into writing commas, periods and capitals.
+            "--prompt", "Привет! Сегодня я расскажу, как прошёл мой день. Было холодно, но солнечно, и мы гуляли в парке. А ты как?" })
             info.ArgumentList.Add(argument);
         using var process = Process.Start(info) ?? throw new IOException("Speech engine did not start");
         var stdout = process.StandardOutput.ReadToEndAsync();
@@ -757,6 +794,14 @@ sealed partial class IslandApp
         }
         catch (Exception) { island.Send(new { t = "ratesError" }); }
         finally { ratesBusy = false; }
+    }
+
+    // ---------------------------------------------------------------- audio output switch
+
+    void PushAudio()
+    {
+        try { island.Send(new { t = "audio", list = AudioDevices.List().Select(d => new { id = d.Id, name = d.Name, on = d.Default }).ToList() }); }
+        catch (Exception) { island.Send(new { t = "audio", list = Array.Empty<object>() }); }
     }
 }
 
