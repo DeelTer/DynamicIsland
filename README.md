@@ -59,3 +59,7 @@ User data (settings, clipboard history, shelf files) is stored in `%LOCALAPPDATA
 | Middle click on the pill | Play / pause |
 | Right click on the pill | Paste the last clipboard entry |
 
+
+## Windows installer
+
+Run `build-installer.bat` to build `release/Island-Setup.exe` from this project. Building requires the .NET 9 SDK and Inno Setup 7. The installer is per-user (no administrator rights), offers optional desktop shortcut and Windows startup, and installs the Microsoft WebView2 Runtime only if it is missing. The speech model and app assets are bundled.
