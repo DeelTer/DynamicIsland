@@ -80,6 +80,15 @@ internal static class Native
         keybd_event(key, 0, 2, 0);
     }
 
+    [DllImport("user32")] internal static extern bool ShowWindow(nint window, int command);
+    [DllImport("shell32")] static extern int SHGetKnownFolderPath(ref Guid id, uint flags, nint token, out nint path);
+
+    internal static string? KnownFolder(Guid id)
+    {
+        if (SHGetKnownFolderPath(ref id, 0, 0, out var ptr) != 0) return null;
+        try { return Marshal.PtrToStringUni(ptr); } finally { Marshal.FreeCoTaskMem(ptr); }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     struct GuiThreadInfo { public int Size; public uint Flags; public nint Active, Focus, Capture, MenuOwner, MoveSize, Caret; public Rect CaretRect; }
     [DllImport("user32")] static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);

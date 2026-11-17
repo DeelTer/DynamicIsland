@@ -466,16 +466,34 @@ sealed partial class IslandApp
         catch (Exception) { shot?.Dispose(); shot = null; }
         finally { if (shownMonitor > 0) { island.Show(); island.Send(new { t = "appear" }); } }
         if (shot == null) { Toast("error", "Захват экрана недоступен", "", "warning-circle", "#ff6b6b"); return; }
-        using (shot) ScreenshotReady(shot);
+        ScreenshotReady(shot);
     }
 
-    void ScreenshotReady(Bitmap shot)
+    /// Takes ownership of <paramref name="shot"/>.
+    async void ScreenshotReady(Bitmap shot)
     {
+        using var _ = shot;
         string name = "Скриншот " + DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss") + ".png";
         string? key = AddShelfBitmap(shot, name);
         try { Clipboard.SetImage(shot); ownSequence = Native.GetClipboardSequenceNumber(); } catch (Exception) { }
+        string thumb = DataUrl(shot, 360, true);
+        string? png = ClipPng(shot);
+        var seen = await AnalyzeShot(shot);
+        // Screenshots join the clipboard history too, so their text is searchable later.
+        if (png != null) AddClip(new Clip("Картинки", png, Ocr: seen.Text.Length > 0 ? seen.Text : null));
+        var actions = new List<object> { Act("tab:shelf", null, "tray"), Act("shelfFolder", null, "folder-open") };
+        if (seen.Text.Length > 0) actions.Insert(0, Act("copy:" + seen.Text, "Текст", "text-t"));
         Toast("shot", "Скриншот готов", (key != null ? "В буфере и на полке" : "В буфере") + $" · {shot.Width}×{shot.Height}", "", "#34d399",
-            [Act("tab:shelf", null, "tray"), Act("shelfFolder", null, "folder-open")], DataUrl(shot, 360, true), 6500);
+            actions.ToArray(), thumb, 6500);
+        if (seen.Qr != null) ShowQr(seen.Qr);
+    }
+
+    static string? ClipPng(Image image)
+    {
+        if ((long)image.Width * image.Height > 6_000_000) return null;
+        using var stream = new MemoryStream();
+        image.Save(stream, ImageFormat.Png);
+        return stream.Length <= 1_200_000 ? Convert.ToBase64String(stream.ToArray()) : null;
     }
 
     // ---------------------------------------------------------------- shelf
@@ -626,44 +644,72 @@ sealed partial class IslandApp
             if (snip && Clipboard.ContainsImage() && Clipboard.GetImage() is Bitmap snipped)
             {
                 snipUntil = default;
-                using (snipped) ScreenshotReady(snipped);
+                ScreenshotReady(snipped);
                 return;
             }
             if (!state.History) return;
             var owner = Native.ProcessName(Native.GetClipboardOwner());
             if (new[] { "keepass", "bitwarden", "1password", "enpass", "dashlane", "lastpass" }
                 .Any(name => owner.Contains(name, StringComparison.OrdinalIgnoreCase))) return;
-            Clip? clip = null;
             if (data.GetDataPresent(DataFormats.UnicodeText) && data.GetData(DataFormats.UnicodeText) is string value &&
                 value.Length is > 0 and <= 16000 && !string.IsNullOrWhiteSpace(value))
-                clip = new(Store.Classify(value), value);
-            else if (Clipboard.ContainsImage() && Clipboard.GetImage() is Image image)
-                using (image)
-                    if ((long)image.Width * image.Height <= 6_000_000)
-                    {
-                        using var stream = new MemoryStream();
-                        image.Save(stream, ImageFormat.Png);
-                        if (stream.Length <= 1_200_000) clip = new("Картинки", Convert.ToBase64String(stream.ToArray()));
-                    }
-            if (clip == null) return;
-            var original = state.Clips.Find(c => c.Kind == clip.Kind && c.Value == clip.Value);
-            if (original != null) { state.Clips.Remove(original); clip = original; }
-            state.Clips.Insert(0, clip with { At = DateTimeOffset.Now.ToUnixTimeSeconds() });
-            ExpireClips();
-            while (state.Clips.Count > 80 || state.Clips.Sum(c => (long)c.Value.Length) > 8_000_000)
+                AddClip(new(Store.Classify(value), value));
+            else if (Clipboard.ContainsImage() && Clipboard.GetImage() is Bitmap image)
             {
-                int index = state.Clips.FindLastIndex(c => !c.Pinned);
-                if (index < 0) break;
-                state.Clips.RemoveAt(index);
+                string? png;
+                using (image) png = ClipPng(image);
+                if (png != null && AddClip(new("Картинки", png)) is { Ocr: null } added) AnalyzeClip(added);
             }
-            noteSave.Stop(); noteSave.Start();
-            PushClips();
         }
         catch (Exception) { }
     }
 
+    /// Inserts (or moves to the top) a history entry; returns the stored clip.
+    Clip? AddClip(Clip clip)
+    {
+        if (!state.History) return null;
+        var original = state.Clips.Find(c => c.Kind == clip.Kind && c.Value == clip.Value);
+        if (original != null) { state.Clips.Remove(original); clip = original with { Ocr = original.Ocr ?? clip.Ocr }; }
+        clip = clip with { At = DateTimeOffset.Now.ToUnixTimeSeconds() };
+        state.Clips.Insert(0, clip);
+        ExpireClips();
+        long total = state.Clips.Sum(c => (long)c.Value.Length);
+        while (state.Clips.Count > 80 || total > 8_000_000)
+        {
+            int index = state.Clips.FindLastIndex(c => !c.Pinned);
+            if (index < 0) break;
+            total -= state.Clips[index].Value.Length;
+            state.Clips.RemoveAt(index);
+        }
+        noteSave.Stop(); noteSave.Start();
+        PushClips();
+        return clip;
+    }
+
+    /// Copied images: OCR in the background (search), QR → toast with copy / open.
+    async void AnalyzeClip(Clip clip)
+    {
+        Vision.Result seen;
+        try
+        {
+            using var stream = new MemoryStream(Convert.FromBase64String(clip.Value));
+            using var bitmap = new Bitmap(stream);
+            seen = await Vision.Analyze(bitmap);
+        }
+        catch (Exception) { return; }
+        int index = state.Clips.FindIndex(c => c.Kind == clip.Kind && c.Value == clip.Value);
+        if (index >= 0 && seen.Text.Length > 0)
+        {
+            state.Clips[index] = state.Clips[index] with { Ocr = seen.Text };
+            noteSave.Stop(); noteSave.Start();
+            PushClips();
+        }
+        if (seen.Qr != null) ShowQr(seen.Qr);
+    }
+
     nint lastExternal;
-    readonly Dictionary<string, string> clipThumbs = new();
+    // Keyed by the clip string instance: no rehashing megabytes of base64 on every push.
+    readonly System.Runtime.CompilerServices.ConditionalWeakTable<string, string> clipThumbRefs = new();
 
     /// Ctrl+Alt+V: the clipboard lives inside the island, on its own tab.
     void ShowClipboard()
@@ -675,19 +721,46 @@ sealed partial class IslandApp
         island.FocusPage();
     }
 
+    /// Thumbnail as a small JPEG file served from https://thumbs.island/ — the page caches it,
+    /// so a clipboard update sends a few bytes per image instead of a data URL.
     string ClipThumb(string base64)
     {
-        string key = base64.Length + ":" + base64.GetHashCode();
-        if (clipThumbs.TryGetValue(key, out var cached)) return cached;
+        if (clipThumbRefs.TryGetValue(base64, out var url)) return url;
+        string name = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.ASCII.GetBytes(base64)))[..20] + ".jpg";
+        string path = Path.Combine(Store.Folder, "thumbs", name);
+        url = "https://thumbs.island/" + name;
         try
         {
-            using var stream = new MemoryStream(Convert.FromBase64String(base64));
-            using var image = Image.FromStream(stream);
-            cached = DataUrl(image, 220);
+            if (!File.Exists(path))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                using var stream = new MemoryStream(Convert.FromBase64String(base64));
+                using var image = Image.FromStream(stream);
+                double k = Math.Min(1, 240.0 / Math.Max(image.Width, image.Height));
+                using var small = new Bitmap(Math.Max(1, (int)(image.Width * k)), Math.Max(1, (int)(image.Height * k)));
+                using (var g = Graphics.FromImage(small))
+                {
+                    g.Clear(Color.FromArgb(28, 28, 30));
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(image, 0, 0, small.Width, small.Height);
+                }
+                small.Save(path, ImageFormat.Jpeg);
+            }
         }
-        catch (Exception) { cached = ""; }
-        if (clipThumbs.Count > 200) clipThumbs.Clear();
-        return clipThumbs[key] = cached;
+        catch (Exception) { url = ""; }
+        clipThumbRefs.AddOrUpdate(base64, url);
+        return url;
+    }
+
+    /// Old thumbnails whose clips are gone (history keeps at most 7 days).
+    static void CleanThumbs()
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(Path.Combine(Store.Folder, "thumbs")))
+                if (DateTime.Now - File.GetLastWriteTime(file) > TimeSpan.FromDays(30)) File.Delete(file);
+        }
+        catch (Exception) { }
     }
 
     void PushClips()
@@ -696,7 +769,8 @@ sealed partial class IslandApp
         {
             i, kind = c.Kind, pinned = c.Pinned,
             text = c.Kind == "Картинки" ? null : c.Value.Length > 1200 ? c.Value[..1200] : c.Value,
-            image = c.Kind == "Картинки" ? ClipThumb(c.Value) : null
+            image = c.Kind == "Картинки" ? ClipThumb(c.Value) : null,
+            ocr = c.Ocr is { Length: > 2000 } o ? o[..2000] : c.Ocr
         }).OrderByDescending(c => c.pinned).ToList();
         Patch("clips", new { items, history = state.History });
     }
@@ -718,7 +792,6 @@ sealed partial class IslandApp
         catch (Exception) { island.Send(new { t = "flash", text = "Буфер занят" }); return false; }
     }
 
-    /// Right click on the pill: put the newest history entry back and paste it into the app you were in.
     /// Unpinned clips live 7 days. Clips saved before timestamps existed start their week now.
     bool ExpireClips()
     {
@@ -728,6 +801,7 @@ sealed partial class IslandApp
         return state.Clips.RemoveAll(c => !c.Pinned && now - c.At > 7 * 86400) > 0;
     }
 
+    /// Right click on the pill: put the newest history entry back and paste it into the app you were in.
     async void PasteLast()
     {
         if (state.Clips.Count > 0 && !SetClipboard(state.Clips[0])) return;

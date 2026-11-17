@@ -18,6 +18,33 @@ static class Program
                 Store.ShelfPath(Guid.NewGuid().ToString("N") + "/a.pdf") != "";
             Environment.Exit(ok ? 0 : 1);
         }
+        if (args.Contains("--vision-check")) // diagnostics: OCR + QR on a generated image
+        {
+            using var image = new System.Drawing.Bitmap(900, 360);
+            using (var g = System.Drawing.Graphics.FromImage(image))
+            {
+                g.Clear(System.Drawing.Color.White);
+                using var font = new System.Drawing.Font("Segoe UI", 22);
+                g.DrawString("Привет, мир! Счёт №1234 от 18.11.2026", font, System.Drawing.Brushes.Black, 20, 30);
+                g.DrawString("Island screenshot OCR test", font, System.Drawing.Brushes.Black, 20, 80);
+                var writer = new ZXing.BarcodeWriterPixelData { Format = ZXing.BarcodeFormat.QR_CODE, Options = new ZXing.Common.EncodingOptions { Width = 200, Height = 200, Margin = 1 } };
+                var qr = writer.Write("https://github.com/");
+                using var qrBitmap = new System.Drawing.Bitmap(qr.Width, qr.Height, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+                var bits = qrBitmap.LockBits(new System.Drawing.Rectangle(0, 0, qr.Width, qr.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+                System.Runtime.InteropServices.Marshal.Copy(qr.Pixels, 0, bits.Scan0, qr.Pixels.Length);
+                qrBitmap.UnlockBits(bits);
+                g.DrawImage(qrBitmap, 660, 140);
+            }
+            var result = Vision.Analyze(image).GetAwaiter().GetResult();
+            System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "vision-check.txt"), $"QR: {result.Qr}\nOCR:\n{result.Text}\n");
+            return;
+        }
+        if (args.Contains("--notify-check")) // diagnostics: parse the last messenger notifications (no content printed)
+        {
+            var report = IslandApp.NotifyProbe();
+            System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "notify-check.txt"), report);
+            return;
+        }
         if (args.Contains("--audio-check")) // diagnostics: output devices + 1 s of microphone levels
         {
             using var log = new System.IO.StreamWriter(System.IO.Path.Combine(AppContext.BaseDirectory, "audio-check.txt"));

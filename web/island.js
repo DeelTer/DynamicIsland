@@ -284,6 +284,7 @@ function activity() {
   if (S.rec.state === 'rec') return 'rec';
   if (S.rec.state === 'busy') return 'busy';
   if (S.timer.endsAt || S.timer.pausedMs > 0) return 'timer';
+  if (S.dl) return 'dl';
   if (S.media.has && S.media.playing) return 'media';
   return 'idle';
 }
@@ -332,6 +333,10 @@ function renderCompact() {
     `<div class="side" style="color:var(--orange)">${ic('timer:fill', 18)}</div>
      <span class="time num" style="color:var(--orange)" data-k="timer"></span>
      <div class="side"><span class="muted num" data-k="clock"></span></div>`;
+  else if (a === 'dl') html =
+    `<div class="side dl" style="color:#4aa3ff"><span class="dl-ico">${ic('download-simple', 17)}</span>${S.dl.count > 1 ? `<span class="badge">${S.dl.count}</span>` : ''}</div>
+     <span class="time num" style="color:#8cc8ff">${size(S.dl.bytes)}</span>
+     <div class="side"><span class="muted num">${S.dl.speed > 0 ? size(S.dl.speed) + '/с' : '…'}</span></div>`;
   else if (a === 'media') html =
     `<div class="side">${S.art ? `<img class="art" src="${S.art}">` : `<span style="color:${S.artColor};display:flex">${ic('music-notes', 18)}</span>`}${shelf}</div>
      <span class="time num" data-k="clock"></span>
@@ -365,7 +370,13 @@ let current = null, toastT = 0, toastLeft = 0, toastStart = 0;
 function showToast(t) {
   toasts.push(t);
   if (toasts.length > 4) toasts.shift();
-  if (mode === 'panel') { flash(t.title.length > 40 ? t.title.slice(0, 40) + '…' : t.title); toasts.pop(); return; }
+  if (mode === 'panel') {
+    // Messages never interrupt an open panel; everything else becomes a short flash.
+    if (t.kind !== 'msg') flash(t.title.length > 40 ? t.title.slice(0, 40) + '…' : t.title);
+    toasts.pop(); return;
+  }
+  // A new message replaces a pending one from the queue instead of stacking up.
+  if (t.kind === 'msg') { for (let i = toasts.length - 2; i >= 0; i--) if (toasts[i].kind === 'msg') toasts.splice(i, 1); }
   if (!current) nextToast();
 }
 
@@ -402,6 +413,15 @@ function renderToast(t) {
   } else if (t.kind === 'shot') {
     html = `<img class="shot" src="${t.image}"><div class="txt"><div class="title">${esc(t.title)}</div><div class="sub">${esc(t.sub)}</div></div>
       <div class="acts" style="flex-direction:column">${actionButtons(t.actions || [])}</div>`;
+  } else if (t.kind === 'msg') {
+    // Messenger peek: avatar + sender + one line; the whole card opens the app.
+    const open = (t.actions || [])[0];
+    html = `<div class="msg" ${open ? `data-act="toast:${esc(open.id)}"` : ''}>
+        <div class="ava" style="--c:${esc(t.color)}">${t.image ? `<img src="${t.image}">` : ic('chat-circle-dots', 20)}<b>${esc((t.extra?.app || '?')[0])}</b></div>
+        <div class="txt"><div class="title"><span class="mapp" style="color:${esc(t.color)}">${esc(t.extra?.app || '')}</span>${esc(t.title)}</div>${t.sub ? `<div class="sub">${esc(t.sub)}</div>` : ''}</div>
+      </div>`;
+  } else if (t.kind === 'dl' && t.image) {
+    html = `<img class="dlthumb" src="${t.image}"><div class="txt"><div class="title">${esc(t.title)}</div><div class="sub">${esc(t.sub)}</div></div>${acts}`;
   } else {
     const color = t.color || '#8e8e93';
     html = `<div class="badge-ico" style="background:${color}22;color:${color}">${ic(t.icon || 'bell', 22)}</div>
@@ -580,7 +600,9 @@ let clipFilter = 'Все', clipSel = -1;
 const CLIP_FILTERS = ['Все', 'Картинки', 'Текст', 'Ссылки'];
 function clipVisible() {
   const q = ($('#cq')?.value || '').trim().toLowerCase();
-  return S.clips.items.filter(c => (clipFilter === 'Все' || c.kind === clipFilter) && (!q || (c.text && c.text.toLowerCase().includes(q))));
+  // Images match by the text recognised on them (OCR), so screenshots are searchable.
+  return S.clips.items.filter(c => (clipFilter === 'Все' || c.kind === clipFilter) &&
+    (!q || (c.text && c.text.toLowerCase().includes(q)) || (c.ocr && c.ocr.toLowerCase().includes(q))));
 }
 function clipHtml() {
   return `<div class="cbar">
@@ -601,8 +623,9 @@ function clipListHtml() {
       <span class="cact" data-act="cremove" title="Удалить">${ic('x', 13)}</span>`;
   const images = list.filter(c => c.image), texts = list.filter(c => !c.image);
   let html = '';
+  const ocrBtn = c => c.ocr ? `<span class="cact" data-act="cocr" title="Копировать текст с картинки">${ic('text-t', 13)}</span>` : '';
   if (images.length) html += `<div class="cgrid">${images.map(c => `<div class="citem cimg ${c.i === clipSel ? 'sel' : ''}" data-i="${c.i}" title="Клик — копировать, двойной — вставить, тяните — как файл">
-      <img src="${c.image}" draggable="false"><div class="cacts">${pin(c)}</div></div>`).join('')}</div>`;
+      <img src="${c.image}" draggable="false"><div class="cacts">${ocrBtn(c)}${pin(c)}</div></div>`).join('')}</div>`;
   if (texts.length) html += `<div class="crows">${texts.map(c => `<div class="citem crow ${c.i === clipSel ? 'sel' : ''}" data-i="${c.i}" title="Клик — копировать, двойной — вставить">
       <span class="kind">${ic(c.kind === 'Ссылки' ? 'link' : 'text-t', 15)}</span>
       <div class="val ${c.kind === 'Ссылки' ? 'link' : ''}">${esc(c.text)}</div><div class="cacts">${pin(c)}</div></div>`).join('')}</div>`;
@@ -950,6 +973,12 @@ function act(name, el, e) {
     case 'chistory': post({ t: 'clipHistory', on: !S.clips.history }); break;
     case 'cpin': e.stopPropagation(); post({ t: 'clipPin', i: +el.closest('.citem').dataset.i }); break;
     case 'cremove': e.stopPropagation(); post({ t: 'clipRemove', i: +el.closest('.citem').dataset.i }); break;
+    case 'cocr': {
+      e.stopPropagation();
+      const c = S.clips.items.find(x => x.i === +el.closest('.citem').dataset.i);
+      if (c?.ocr) { post({ t: 'copy', text: c.ocr }); }
+      break;
+    }
     case 'cclear': armed(el, () => post({ t: 'clipClear' })); break;
     case 'ack': ackTimer(); break;
     case 'pin': pinned = !pinned; el.classList.toggle('on', pinned); el.innerHTML = ic(pinned ? 'push-pin:fill' : 'push-pin', 19); break;
@@ -1256,7 +1285,7 @@ function applyPatch(k, v) {
 }
 
 function refresh(k) {
-  if (mode === 'compact' || k === 'shelf' || k === 'rec' || k === 'timer' || k === 'media') {
+  if (mode === 'compact' || k === 'shelf' || k === 'rec' || k === 'timer' || k === 'media' || k === 'dl') {
     const before = views.compact._html;
     renderCompact();
     if (mode === 'compact' && before !== views.compact._html) layout(CLOSE);

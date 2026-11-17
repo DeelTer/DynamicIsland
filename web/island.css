@@ -547,3 +547,17 @@ body.demo { background: linear-gradient(135deg, #3b6fd6, #5b3cc4 45%, #b0607a); 
 .tool.rec { color: var(--red); gap: 10px; }
 .tool.rec .num { font-weight: 700; font-size: 15px; min-width: 38px; }
 .tool.rec .vwave { flex: 1; justify-content: flex-end; height: 26px; }
+
+/* messenger peek */
+.msg { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; cursor: pointer; }
+.msg .ava { position: relative; width: 42px; height: 42px; flex: none; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 22%, transparent); color: var(--c); }
+.msg .ava img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.msg .ava b { position: absolute; right: -3px; bottom: -3px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; color: #fff; background: var(--c); box-shadow: 0 0 0 2px #000; }
+#toast .msg .title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg .title .mapp { font-size: 11px; font-weight: 700; margin-right: 6px; text-transform: uppercase; letter-spacing: .04em; }
+#toast .msg .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* downloads */
+.dlthumb { width: 46px; height: 46px; object-fit: contain; flex: none; }
+.side.dl .dl-ico { display: flex; animation: dlbob 1.1s ease-in-out infinite; }
+@keyframes dlbob { 0%, 100% { transform: translateY(-2px); } 50% { transform: translateY(2px); } }

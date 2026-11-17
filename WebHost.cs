@@ -40,7 +40,7 @@ sealed class WebHost : Form
         _ = Initialize();
     }
 
-    public double Scale => Native.GetDpiForWindow(Handle) / 96.0;
+    public new double Scale => Native.GetDpiForWindow(Handle) / 96.0;
 
     protected override CreateParams CreateParams
     {
@@ -100,6 +100,9 @@ sealed class WebHost : Form
         settings.IsGeneralAutofillEnabled = false;
         settings.IsPasswordAutosaveEnabled = false;
         core.SetVirtualHostNameToFolderMapping("island.local", Path.Combine(AppContext.BaseDirectory, "web"), CoreWebView2HostResourceAccessKind.Deny);
+        // Clipboard thumbnails as cached files instead of megabytes of data URLs per update.
+        Directory.CreateDirectory(Path.Combine(Store.Folder, "thumbs"));
+        core.SetVirtualHostNameToFolderMapping("thumbs.island", Path.Combine(Store.Folder, "thumbs"), CoreWebView2HostResourceAccessKind.DenyCors);
         core.NewWindowRequested += (_, e) => e.Handled = true;
         core.WebMessageReceived += Received;
         core.Navigate("https://island.local/" + page);

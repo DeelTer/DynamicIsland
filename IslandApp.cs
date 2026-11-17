@@ -50,6 +50,9 @@ sealed partial class IslandApp : ApplicationContext
         Native.RegisterHotKey(island.Handle, 3, 0x4003, 0x44); // Ctrl+Alt+D: dictate into the focused field
         homeMonitor = FindMonitor(state.AnchorMonitor);
         ConfigureTray();
+        StartDownloadWatch();
+        Task.Run(CleanThumbs);
+        StartNotifyWatch();
         tick.Tick += (_, _) => Tick();
         tick.Start();
         noteSave.Tick += (_, _) => { noteSave.Stop(); Save(); };
@@ -335,6 +338,8 @@ sealed partial class IslandApp : ApplicationContext
         ticks++;
         if (DateTimeOffset.Now > leanAt) { leanAt = DateTimeOffset.MaxValue; island.Lean(true); }
         CheckTimer();
+        if (ticks % 2 == 0) PollDownloads();
+        if (ticks % 20 == 7 && state.Notify) CheckNotifications(); // fallback if the file watcher misses a write
         if (ticks % 4 == 0)
         {
             CheckForeground();
@@ -389,6 +394,16 @@ sealed partial class IslandApp : ApplicationContext
         else if (id.StartsWith("timer:") && int.TryParse(id[6..], out int minutes)) StartTimer(minutes);
         else if (id == "shelfFolder") Process.Start(new ProcessStartInfo("explorer.exe", "\"" + Path.Combine(Store.Folder, "shelf") + "\"") { UseShellExecute = true });
         else if (id.StartsWith("copy:")) CopyText(id[5..]);
+        else if (id.StartsWith("url:") && Uri.TryCreate(id[4..], UriKind.Absolute, out var url) && url.Scheme is "http" or "https") Shell(url.AbsoluteUri);
+        else if (id.StartsWith("open:") && File.Exists(id[5..])) Shell(id[5..]);
+        else if (id.StartsWith("reveal:") && File.Exists(id[7..])) Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{id[7..]}\"") { UseShellExecute = true });
+        else if (id.StartsWith("shelfAdd:") && File.Exists(id[9..])) AddShelfFiles([id[9..]]);
+        else if (id.StartsWith("app:")) FocusApp(id[4..]);
+    }
+
+    static void Shell(string target)
+    {
+        try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); } catch (Exception) { }
     }
 
     // ---------------------------------------------------------------- tray
@@ -421,6 +436,12 @@ sealed partial class IslandApp : ApplicationContext
         historyItem = new ToolStripMenuItem("Записывать историю буфера") { Checked = state.History, CheckOnClick = true };
         historyItem.CheckedChanged += (_, _) => SetHistory(historyItem.Checked);
         menu.Items.Add(historyItem);
+        var notify = new ToolStripMenuItem("Уведомления Telegram / Discord / WhatsApp") { Checked = state.Notify, CheckOnClick = true };
+        var notifyText = new ToolStripMenuItem("   Показывать текст сообщений") { Checked = state.NotifyText, CheckOnClick = true, Enabled = state.Notify };
+        notify.CheckedChanged += (_, _) => { state = state with { Notify = notify.Checked }; notifyText.Enabled = notify.Checked; Save(); };
+        notifyText.CheckedChanged += (_, _) => { state = state with { NotifyText = notifyText.Checked }; Save(); };
+        menu.Items.Add(notify);
+        menu.Items.Add(notifyText);
         var autostart = new ToolStripMenuItem("Запускать вместе с Windows") { Checked = Autostart, CheckOnClick = true };
         autostart.CheckedChanged += (_, _) => { Autostart = autostart.Checked; autostart.Checked = Autostart; };
         menu.Items.Add(autostart);
@@ -514,6 +535,7 @@ sealed partial class IslandApp : ApplicationContext
         if (iconCache.TryGetValue(key, out var cached)) return cached;
         using var bitmap = Native.ShellImage(path, size * 2, !thumbnail);
         cached = bitmap == null ? null : DataUrl(bitmap, size * 2);
+        if (iconCache.Count > 150) iconCache.Clear(); // data URLs are big; keep the cache bounded
         iconCache[key] = cached;
         return cached;
     }
