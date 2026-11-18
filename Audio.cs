@@ -170,6 +170,14 @@ static class Uia
     const int ControlType = 30003, IsPassword = 30019, IsTextPattern = 30040, IsValuePattern = 30043, ValueReadOnly = 30046;
     const int Edit = 50004, Document = 50030;
 
+    /// The focused element is a password box (in any app that exposes UI Automation).
+    public static bool FocusedIsPassword()
+    {
+        var automation = (IUIAutomation)new CUIAutomation();
+        if (automation.GetFocusedElement(out var element) != 0 || element == null) return false;
+        return element.GetCurrentPropertyValue(IsPassword, out var v) == 0 && v is true;
+    }
+
     public static bool FocusedIsEditable()
     {
         var automation = (IUIAutomation)new CUIAutomation();

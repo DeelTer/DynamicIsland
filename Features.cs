@@ -673,7 +673,7 @@ sealed partial class IslandApp
                 .Any(name => owner.Contains(name, StringComparison.OrdinalIgnoreCase))) return;
             if (data.GetDataPresent(DataFormats.UnicodeText) && data.GetData(DataFormats.UnicodeText) is string value &&
                 value.Length is > 0 and <= 16000 && !string.IsNullOrWhiteSpace(value))
-                AddClip(new(Store.Classify(value), value));
+                AddTextClip(value);
             else if (Clipboard.ContainsImage() && Clipboard.GetImage() is Bitmap image)
             {
                 string? png;
@@ -684,11 +684,28 @@ sealed partial class IslandApp
         catch (Exception) { }
     }
 
+    /// Text from a password box (UI Automation says so) or anything shaped like a password/key is
+    /// stored encrypted and shown masked; everything else is stored as is.
+    async void AddTextClip(string value)
+    {
+        bool secret = Store.LooksSecret(value);
+        if (!secret && value.Length <= 256 && !value.Contains('\n'))
+        {
+            var check = Task.Run(() => { try { return Uia.FocusedIsPassword(); } catch (Exception) { return false; } });
+            secret = await Task.WhenAny(check, Task.Delay(300)) == check && check.Result;
+        }
+        try { AddClip(secret ? new Clip("Текст", Store.Protect(value), Secret: true) : new Clip(Store.Classify(value), value)); }
+        catch (Exception) { } // DPAPI unavailable: better to drop the secret than to store it in plain text
+    }
+
+    static bool SameClip(Clip a, Clip b) =>
+        a.Kind == b.Kind && a.Secret == b.Secret && (a.Secret ? Store.Plain(a) == Store.Plain(b) : a.Value == b.Value);
+
     /// Inserts (or moves to the top) a history entry; returns the stored clip.
     Clip? AddClip(Clip clip)
     {
         if (!state.History) return null;
-        var original = state.Clips.Find(c => c.Kind == clip.Kind && c.Value == clip.Value);
+        var original = state.Clips.Find(c => SameClip(c, clip));
         if (original != null) { state.Clips.Remove(original); clip = original with { Ocr = original.Ocr ?? clip.Ocr }; }
         clip = clip with { At = DateTimeOffset.Now.ToUnixTimeSeconds() };
         state.Clips.Insert(0, clip);
@@ -788,7 +805,9 @@ sealed partial class IslandApp
         var items = state.Clips.Select((c, i) => new
         {
             i, kind = c.Kind, pinned = c.Pinned,
-            text = c.Kind == "Картинки" ? null : c.Value.Length > 1200 ? c.Value[..1200] : c.Value,
+            // Secrets never reach the page in full — only the mask.
+            text = c.Kind == "Картинки" ? null : c.Secret ? Store.Mask(Store.Plain(c)) : c.Value.Length > 1200 ? c.Value[..1200] : c.Value,
+            secret = c.Secret,
             image = c.Kind == "Картинки" ? ClipThumb(c.Value) : null,
             ocr = c.Ocr is { Length: > 2000 } o ? o[..2000] : c.Ocr
         }).OrderByDescending(c => c.pinned).ToList();
@@ -805,7 +824,17 @@ sealed partial class IslandApp
                 using var image = Image.FromStream(stream);
                 Clipboard.SetImage(image);
             }
-            else Clipboard.SetText(clip.Value);
+            else if (clip.Secret)
+            {
+                // Like password managers: keep it out of Win+V history and cloud clipboard sync.
+                var data = new DataObject();
+                data.SetData(DataFormats.UnicodeText, Store.Plain(clip));
+                data.SetData("ExcludeClipboardContentFromMonitorProcessing", new MemoryStream(new byte[] { 1, 0, 0, 0 }));
+                data.SetData("CanIncludeInClipboardHistory", new MemoryStream(new byte[4]));
+                data.SetData("CanUploadToCloudClipboard", new MemoryStream(new byte[4]));
+                Clipboard.SetDataObject(data, true);
+            }
+            else Clipboard.SetText(Store.Plain(clip));
             ownSequence = Native.GetClipboardSequenceNumber();
             return true;
         }
@@ -818,7 +847,8 @@ sealed partial class IslandApp
         long now = DateTimeOffset.Now.ToUnixTimeSeconds();
         for (int i = 0; i < state.Clips.Count; i++)
             if (state.Clips[i].At == 0) state.Clips[i] = state.Clips[i] with { At = now };
-        return state.Clips.RemoveAll(c => !c.Pinned && now - c.At > 7 * 86400) > 0;
+        // Passwords and keys leave the history after a day, everything else after a week.
+        return state.Clips.RemoveAll(c => !c.Pinned && now - c.At > (c.Secret ? 86400 : 7 * 86400)) > 0;
     }
 
     /// Right click on the pill: put the newest history entry back and paste it into the app you were in.
@@ -870,7 +900,7 @@ sealed partial class IslandApp
                     }
                     catch (Exception) { break; }
                 }
-                else data.SetData(DataFormats.UnicodeText, clip.Value);
+                else data.SetData(DataFormats.UnicodeText, Store.Plain(clip));
                 island.DoDragDrop(data, DragDropEffects.Copy);
                 island.Send(new { t = "dragDone" });
                 break;

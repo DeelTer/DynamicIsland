@@ -665,8 +665,8 @@ function clipListHtml() {
   if (images.length) html += `<div class="cgrid">${images.map(c => `<div class="citem cimg ${c.i === clipSel ? 'sel' : ''}" data-i="${c.i}" title="Клик — копировать, двойной — вставить, тяните — как файл">
       <img src="${c.image}" draggable="false"><div class="cacts">${ocrBtn(c)}${pin(c)}</div></div>`).join('')}</div>`;
   if (texts.length) html += `<div class="crows">${texts.map(c => `<div class="citem crow ${c.i === clipSel ? 'sel' : ''}" data-i="${c.i}" title="Клик — копировать, двойной — вставить">
-      <span class="kind">${ic(c.kind === 'Ссылки' ? 'link' : 'text-t', 15)}</span>
-      <div class="val ${c.kind === 'Ссылки' ? 'link' : ''}">${esc(c.text)}</div><div class="cacts">${pin(c)}</div></div>`).join('')}</div>`;
+      <span class="kind ${c.secret ? 'lock' : ''}">${ic(c.secret ? 'lock-simple' : c.kind === 'Ссылки' ? 'link' : 'text-t', 15)}</span>
+      <div class="val ${c.kind === 'Ссылки' ? 'link' : ''} ${c.secret ? 'secret' : ''}" ${c.secret ? 'title="Пароль скрыт — копируется полностью"' : ''}>${esc(c.text)}</div><div class="cacts">${pin(c)}</div></div>`).join('')}</div>`;
   return html;
 }
 function renderClipList() { const l = $('#clist'); if (l) l.innerHTML = clipListHtml(); }

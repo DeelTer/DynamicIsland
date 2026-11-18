@@ -15,7 +15,14 @@ static class Program
             bool ok = Store.Classify("https://example.org") == "Ссылки" && Store.Classify("file:///secret") == "Текст" &&
                 Store.Classify("https://example.org\ncomment") == "Текст" && Store.Classify("обычный текст") == "Текст" &&
                 Store.ShelfPath("../test") == "" && Store.ShelfPath(Guid.NewGuid().ToString("N") + "/../x") == "" &&
-                Store.ShelfPath(Guid.NewGuid().ToString("N") + "/a.pdf") != "";
+                Store.ShelfPath(Guid.NewGuid().ToString("N") + "/a.pdf") != "" &&
+                // password heuristic: secrets yes, ordinary text / links / numbers / mail no
+                Store.LooksSecret("Xk9#mPq2vL!") && Store.LooksSecret("ghp_A1b2C3d4E5f6G7h8") && Store.LooksSecret("Qwerty123!") &&
+                !Store.LooksSecret("привет") && !Store.LooksSecret("hello world 1A!") && !Store.LooksSecret("https://ex.com/A1b!") &&
+                !Store.LooksSecret("+7 (999) 123-45-67") && !Store.LooksSecret("18.11.2026") && !Store.LooksSecret("me@mail.ru") &&
+                !Store.LooksSecret("C:\\Users\\A1!") && !Store.LooksSecret("Island") &&
+                Store.Plain(new Clip("Текст", Store.Protect("Xk9#mPq2vL!"), Secret: true)) == "Xk9#mPq2vL!" &&
+                Store.Mask("Xk9#mPq2vL!") == "Xk•••••••••";
             Environment.Exit(ok ? 0 : 1);
         }
         if (args.Contains("--vision-check")) // diagnostics: OCR + QR on a generated image

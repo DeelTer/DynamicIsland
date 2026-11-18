@@ -6,7 +6,8 @@ using System.Text.Json;
 
 namespace Island;
 
-public record Clip(string Kind, string Value, bool Pinned = false, long At = 0, string? Ocr = null);
+/// Secret clips (passwords, keys) keep Value DPAPI-encrypted ("dpapi:…"); use Store.Plain to read them.
+public record Clip(string Kind, string Value, bool Pinned = false, long At = 0, string? Ocr = null, bool Secret = false);
 public record Shortcut(string Path, int Count = 0);
 public record State(List<Clip> Clips, List<Shortcut> Apps, List<string> Games, bool History = false,
     string Note = "", List<string>? Shelf = null, string? AnchorMonitor = null, double AnchorX = 0.5,
@@ -49,6 +50,41 @@ static class Store
         if (parts.Length == 1) return Path.Combine(Folder, "shelf", parts[0] + ".png");
         if (parts.Length != 2 || parts[1].Length == 0 || parts[1] != Path.GetFileName(parts[1]) || parts[1].IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return "";
         return Path.Combine(Folder, "shelf", parts[0], parts[1]);
+    }
+
+    // ---------------------------------------------------------------- secrets in the clipboard history
+
+    static readonly byte[] Entropy = System.Text.Encoding.UTF8.GetBytes("IslandDesktop.clip.v1");
+
+    /// Encrypted with Windows DPAPI for the current user: unreadable to other accounts or on another PC.
+    public static string Protect(string plain) =>
+        "dpapi:" + Convert.ToBase64String(System.Security.Cryptography.ProtectedData.Protect(
+            System.Text.Encoding.UTF8.GetBytes(plain), Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+
+    public static string Plain(Clip clip)
+    {
+        if (!clip.Secret || !clip.Value.StartsWith("dpapi:")) return clip.Value;
+        try
+        {
+            return System.Text.Encoding.UTF8.GetString(System.Security.Cryptography.ProtectedData.Unprotect(
+                Convert.FromBase64String(clip.Value[6..]), Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+        }
+        catch (Exception) { return ""; }
+    }
+
+    /// "ab••••••••": first two characters, the rest hidden (length capped so it does not leak).
+    public static string Mask(string plain) => plain.Length <= 2 ? new string('•', plain.Length) : plain[..2] + new string('•', Math.Min(10, plain.Length - 2));
+
+    /// Single token, 6–128 chars, at least three of lower / upper / digit / symbol, not a URL, mail or path.
+    public static bool LooksSecret(string value)
+    {
+        if (value.Length is < 6 or > 128 || value.Any(char.IsWhiteSpace)) return false;
+        if (value.Contains("://") || value.StartsWith("www.", StringComparison.OrdinalIgnoreCase) || value.Contains('\\') ||
+            System.Text.RegularExpressions.Regex.IsMatch(value, @"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase) ||
+            System.Text.RegularExpressions.Regex.IsMatch(value, @"^[\d\s.,:+\-/()]+$")) return false; // numbers, dates, phones
+        int classes = (value.Any(char.IsLower) ? 1 : 0) + (value.Any(char.IsUpper) ? 1 : 0) + (value.Any(char.IsDigit) ? 1 : 0) +
+                      (value.Any(c => !char.IsLetterOrDigit(c)) ? 1 : 0);
+        return classes >= 3;
     }
 
     public static string Classify(string value)

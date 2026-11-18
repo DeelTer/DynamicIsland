@@ -628,3 +628,7 @@ body.demo { background: linear-gradient(135deg, #3b6fd6, #5b3cc4 45%, #b0607a); 
 .qacts .btn:disabled { opacity: .4; pointer-events: none; }
 /* offsetLeft/Top of sortable tiles are measured against their own container */
 #fxgrid, #dock, #sitems { position: relative; }
+
+/* masked passwords in the clipboard history */
+.crow .kind.lock { color: #ffd60a; }
+.crow .val.secret { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .12em; color: var(--muted); }
