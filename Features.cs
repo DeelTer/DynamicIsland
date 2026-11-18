@@ -123,6 +123,23 @@ sealed partial class IslandApp
         finally { mediaBusy = false; }
     }
 
+    /// Progress drift correction while playing: one timeline read, no media-properties query.
+    void PollTimeline()
+    {
+        var session = mediaSession;
+        if (session == null || mediaBusy) return;
+        try
+        {
+            var timeline = session.GetTimelineProperties();
+            if (timeline == null || timeline.LastUpdatedTime.Year < 2000) return;
+            double duration = (timeline.EndTime - timeline.StartTime).TotalSeconds;
+            if (duration <= 0) return;
+            double position = (timeline.Position - timeline.StartTime).TotalSeconds + Math.Max(0, (DateTimeOffset.Now - timeline.LastUpdatedTime).TotalSeconds);
+            Patch("mediaPos", new { pos = Math.Clamp(position, 0, duration), at = Now() });
+        }
+        catch (Exception) { }
+    }
+
     static Image CropSquare(Image image)
     {
         // Album thumbnails from browsers are often letterboxed 16:9; centre-crop to a square.

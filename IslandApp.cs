@@ -282,6 +282,7 @@ sealed partial class IslandApp : ApplicationContext
             case "dragStart": StartDrag(); break;
             case "volume": Native.MediaKey(m.GetProperty("dir").GetInt32() > 0 ? (byte)0xAF : (byte)0xAE); break;
             case "pasteLast": PasteLast(); break;
+            case "memTrim": TrimMemory(true); break;
             case "jsError": Program.CrashLog(new Exception("JS: " + Str(m, "text"))); break;
             case "appsOrder":
             {
@@ -320,7 +321,7 @@ sealed partial class IslandApp : ApplicationContext
                 Save(); PushShelf();
                 break;
             case "panel":
-                bool panelOpen = m.GetProperty("open").GetBoolean();
+                panelOpen = m.GetProperty("open").GetBoolean();
                 leanAt = panelOpen ? DateTimeOffset.MaxValue : DateTimeOffset.Now.AddSeconds(15);
                 if (panelOpen) { island.Lean(false); if (recorder == null && !voiceBusy) _ = CaptureDictationTarget(); }
                 break;
@@ -368,12 +369,36 @@ sealed partial class IslandApp : ApplicationContext
         if (ticks % 4 == 0)
         {
             CheckForeground();
-            if (ticks % 12 == 0 || mediaPlaying) RefreshMedia(); // events drive changes; this is only a fallback
+            // Track changes arrive as events; a full property query every 3 s is only a fallback, and while
+            // playing the cheap timeline read keeps the progress bar honest (no WinRT property objects).
+            if (ticks % 12 == 0) RefreshMedia();
+            else if (mediaPlaying && ticks % 8 == 0) PollTimeline();
             if (recorder != null && DateTimeOffset.Now - recordingStarted > TimeSpan.FromMinutes(3)) ToggleVoice();
         }
         if (ticks % 120 == 1) PushBattery();
         if (ticks % 14400 == 2 && ExpireClips()) { Save(); PushClips(); } // hourly
         if (ticks % 7200 == 3) _ = RefreshRates(false); // every 30 min
+        if (ticks % 480 == 240) TrimMemory(false); // every 2 min, only when idle
+    }
+
+    [System.Runtime.InteropServices.DllImport("psapi")] static extern bool EmptyWorkingSet(nint process);
+    bool panelOpen;
+
+    /// WinRT media/OCR objects and big image strings are released only when the GC runs, and with a
+    /// tiny managed heap it rarely does — native memory then creeps up for hours. Collect while idle.
+    void TrimMemory(bool force)
+    {
+        bool idle = !panelOpen && recorder == null && !voiceBusy && ytJob == null && downloads.Count == 0;
+        if (!force && !idle) return;
+        long before = Process.GetCurrentProcess().PrivateMemorySize64;
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Forced, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, true, true);
+        using var self = Process.GetCurrentProcess();
+        EmptyWorkingSet(self.Handle);
+        Log($"trim {before / 1048576} MB -> {self.PrivateMemorySize64 / 1048576} MB");
+        if (force) Program.CrashLog(new Exception($"memTrim {before / 1048576} MB -> {self.PrivateMemorySize64 / 1048576} MB")); // diagnostics only
     }
 
     void Patch(string key, object? value) => island.Send(new Dictionary<string, object?> { ["t"] = "patch", [key] = value });

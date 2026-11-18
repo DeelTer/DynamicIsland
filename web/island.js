@@ -228,7 +228,7 @@ function open(t) {
   clearTimeout(dwellT); clearTimeout(leaveT);
   if (S.timer.doneAt) { t = 'timer'; ackTimer(); }
   if (t) tab = t;
-  if (mode === 'panel') { renderPage(true); moveIndicator(true); return; }
+  if (mode === 'panel') { if (pageTab !== tab) renderPage(true); refreshTabs(); return; }
   if (mode === 'toast') {
     clearTimeout(toastT);
     // Opened by hovering/hotkey while a result was showing: bring it back after the panel closes.
@@ -617,7 +617,7 @@ function docIcon(f, big) {
 
 function stripHtml() {
   const n = S.shelf.length;
-  if (!n) return `<div class="tile strip empty" id="strip">${ic('tray', 22)}<span><b>Полка</b> — временное место для файлов: положите сюда, потом перетащите куда нужно</span>
+  if (!n) return `<div class="tile strip empty" id="strip">${ic('tray', 22)}<span><b>Полка</b> — положите файлы сюда, потом перетащите куда нужно</span>
       <button class="btn ghost" data-act="shelfPaste">${ic('clipboard-text', 16)}Вставить</button></div>`;
   const old = S.shelf.filter(f => f.age > 24).length;
   const items = S.shelf.map(f => `<div class="sitem ${f.age > 24 ? 'old' : ''}" data-file="${esc(f.id)}" title="${esc(f.name)}${f.ext === 'folder' ? ' · двойной клик — открыть' : ''}">
