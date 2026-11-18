@@ -11,6 +11,9 @@ const post = (m, files) => {
   if (files && files.length && native.postMessageWithAdditionalObjects) native.postMessageWithAdditionalObjects(m, files);
   else native.postMessage(m);
 };
+// Page errors go to the native errors.log — a silent JS exception is otherwise invisible in the app.
+window.addEventListener('error', e => post({ t: 'jsError', text: `${e.message} @ ${e.filename?.split('/').pop()}:${e.lineno}:${e.colno}\n${e.error?.stack || ''}` }));
+window.addEventListener('unhandledrejection', e => post({ t: 'jsError', text: 'promise: ' + (e.reason?.stack || e.reason) }));
 const ic = (name, size = 20, cls = '') =>
   `<svg class="ico ${cls}" width="${size}" height="${size}" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">${PH[name] || ''}</svg>`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -226,7 +229,12 @@ function open(t) {
   if (S.timer.doneAt) { t = 'timer'; ackTimer(); }
   if (t) tab = t;
   if (mode === 'panel') { renderPage(true); moveIndicator(true); return; }
-  if (mode === 'toast') { clearTimeout(toastT); current = null; }
+  if (mode === 'toast') {
+    clearTimeout(toastT);
+    // Opened by hovering/hotkey while a result was showing: bring it back after the panel closes.
+    if (current && KEEP.has(current.kind) && current.kind !== 'timer') toasts.unshift(current);
+    current = null;
+  }
   if (!t && !S.timer.doneAt && Date.now() - lastClipAt < 10000) tab = 'clip';
   mode = 'panel';
   post({ t: 'panel', open: true });
@@ -335,7 +343,7 @@ function renderCompact() {
      <div class="side"><span class="muted num" data-k="clock"></span></div>`;
   else if (a === 'dl') html =
     `<div class="side dl" style="color:#4aa3ff"><span class="dl-ico">${ic('download-simple', 17)}</span>${S.dl.count > 1 ? `<span class="badge">${S.dl.count}</span>` : ''}</div>
-     <span class="time num" style="color:#8cc8ff">${S.dl.pct != null ? Math.floor(S.dl.pct) + '%' + (S.dl.part ? ' · ' + S.dl.part : '') : S.dl.bytes ? size(S.dl.bytes) : '…'}</span>
+     <span class="time num fixed" style="color:#8cc8ff">${S.dl.pct != null ? Math.floor(S.dl.pct) + '%' + (S.dl.part ? ' · ' + S.dl.part : '') : S.dl.bytes ? size(S.dl.bytes) : '…'}</span>
      <div class="side"><span class="muted num">${S.dl.speed > 0 ? size(S.dl.speed) + '/с' : ''}</span></div>
      ${S.dl.pct != null ? `<i class="dlbar" style="transform:scaleX(${(S.dl.pct / 100).toFixed(3)})"></i>` : ''}`;
   else if (a === 'media') html =
@@ -346,7 +354,14 @@ function renderCompact() {
     `<div class="side">${shelf}<span class="muted" data-k="date"></span></div>
      <span class="time num" data-k="clock"></span>
      <div class="side">${batteryHtml()}</div>`;
-  if (views.compact._html !== html) { views.compact.innerHTML = html; views.compact._html = html; }
+  if (views.compact._html !== html) {
+    views.compact.innerHTML = html; views.compact._html = html;
+    // A different activity (music → download → timer…) swaps in softly; ticking numbers do not.
+    if (views.compact._act !== a && views.compact._act !== undefined && mode === 'compact')
+      views.compact.animate([{ opacity: 0, filter: 'blur(6px)', transform: 'translateX(-50%) scale(.94)' }, { opacity: 1, filter: 'blur(0)', transform: 'translateX(-50%)' }],
+        { duration: 300, easing: 'cubic-bezier(.22,1,.36,1)' });
+    views.compact._act = a;
+  }
   wrap.classList.toggle('alarm', a === 'done');
   tickTexts();
 }
@@ -368,34 +383,53 @@ function tickTexts() {
 const toasts = [];
 let current = null, toastT = 0, toastLeft = 0, toastStart = 0;
 
+// Results the user acts on (a finished download, a QR code, a screenshot, the timer) are never lost:
+// over an open panel they wait in the queue and show once it closes; while the island is hidden
+// (games, fullscreen) their countdown does not run.
+const KEEP = new Set(['dl', 'qr', 'shot', 'timer', 'voice']);
 function showToast(t) {
-  toasts.push(t);
-  if (toasts.length > 4) toasts.shift();
+  // A new message replaces a pending one instead of stacking up.
+  if (t.kind === 'msg') for (let i = toasts.length - 1; i >= 0; i--) if (toasts[i].kind === 'msg') toasts.splice(i, 1);
   if (mode === 'panel') {
-    // Messages never interrupt an open panel; everything else becomes a short flash.
-    if (t.kind !== 'msg') flash(t.title.length > 40 ? t.title.slice(0, 40) + '…' : t.title);
-    toasts.pop(); return;
+    if (t.kind === 'msg') return; // messages never interrupt an open panel
+    flash(t.title.length > 40 ? t.title.slice(0, 40) + '…' : t.title);
+    if (!KEEP.has(t.kind)) return;
   }
-  // A new message replaces a pending one from the queue instead of stacking up.
-  if (t.kind === 'msg') { for (let i = toasts.length - 2; i >= 0; i--) if (toasts[i].kind === 'msg') toasts.splice(i, 1); }
-  if (!current) nextToast();
+  toasts.push(t);
+  while (toasts.length > 6) { const i = toasts.findIndex(x => !KEEP.has(x.kind)); toasts.splice(i < 0 ? 0 : i, 1); }
+  if (!current && mode !== 'panel') nextToast();
 }
 
+let swapping = false;
 function nextToast() {
-  if (mode === 'panel') return;
-  current = toasts.shift() || null;
-  if (!current) {
+  clearTimeout(toastT);
+  if (mode === 'panel' || swapping) return;
+  const next = toasts.shift() || null;
+  if (!next) {
+    current = null;
     if (mode === 'toast') { mode = 'compact'; renderCompact(); switchView(); layout(CLOSE); }
     return;
   }
-  renderToast(current);
-  const wasToast = mode === 'toast';
+  if (mode === 'toast' && current) {
+    // Toast → toast: fade the old content out, then morph the shape to the new one.
+    swapping = true;
+    current = next;
+    const out = views.toast.animate([{ opacity: 1 }, { opacity: 0, filter: 'blur(4px)', transform: 'translateX(-50%) scale(.97)' }],
+      { duration: 120, easing: 'ease-in', fill: 'forwards' });
+    out.onfinish = () => { swapping = false; out.cancel(); presentToast(next, true); };
+    return;
+  }
+  presentToast(next, false);
+}
+function presentToast(t, swap) {
+  current = t;
+  renderToast(t);
   mode = 'toast';
-  if (wasToast) { views.toast.classList.remove('on'); }
+  if (swap) views.toast.classList.remove('on');
   switchView();
   layout(OPEN);
-  toastLeft = current.ms || 4200;
-  if (!hovering) resumeToast();
+  toastLeft = t.ms || 4200;
+  if (!hovering && !hidden) resumeToast();
 }
 function resumeToast() { clearTimeout(toastT); toastStart = performance.now(); toastT = setTimeout(nextToast, toastLeft); }
 function pauseToast() { clearTimeout(toastT); toastLeft = Math.max(1500, toastLeft - (performance.now() - toastStart)); }
@@ -451,6 +485,7 @@ function renderPanel() {
       <div class="group" id="tabs"><div class="indicator"></div>${TABS.map(([id, icon, label]) => `
         <button class="tab ${id === tab ? 'active' : ''}" data-act="tab:${id}" data-tab="${id}">${ic(id === tab ? icon + ':fill' : icon, 20)}<span class="label">${label}</span>${tabCount(id)}</button>`).join('')}
       </div>
+      <span id="dlchip" class="dlchip"></span>
       <div class="spacer"></div>
       <button class="tab ${pinned ? 'on' : ''}" data-act="pin" title="${pinned ? 'Открепить' : 'Не скрывать'}">${ic(pinned ? 'push-pin:fill' : 'push-pin', 19)}</button>
       <button class="tab" data-act="menu" title="Настройки">${ic('gear-six', 20)}</button>
@@ -458,6 +493,7 @@ function renderPanel() {
     <div class="body" id="body"><div class="page" id="page"></div></div>
     <div id="flash"></div>`;
   renderPage(false);
+  dlChip();
   requestAnimationFrame(() => moveIndicator(false));
 }
 
@@ -1006,7 +1042,7 @@ function act(name, el, e) {
     case 'color': post({ t: 'copy', text: arg }); break;
     case 'toast':
       e.stopPropagation();
-      if (arg.startsWith('tab:')) { open(arg.slice(4) === 'shelf' ? 'home' : arg.slice(4)); break; }
+      if (arg.startsWith('tab:')) { current = null; open(arg.slice(4) === 'shelf' ? 'home' : arg.slice(4)); break; }
       if (current?.kind === 'timer') post({ t: 'timerAck' });
       if (arg !== 'dismiss') post({ t: 'toastAction', id: arg });
       clearTimeout(toastT); nextToast();
@@ -1328,12 +1364,25 @@ function applyPatch(k, v) {
   refresh(k);
 }
 
+// While the panel is open the pill is hidden: a running download shows as a chip in the tab bar.
+function dlChip() {
+  const chip = $('#dlchip');
+  if (!chip) return;
+  const d = S.dl;
+  chip.classList.toggle('on', !!d);
+  if (!d) return;
+  chip.title = d.name || '';
+  chip.innerHTML = `${ic('download-simple', 14)}<span class="num">${d.pct != null ? Math.floor(d.pct) + '%' : size(d.bytes || 0)}</span>` +
+    (d.pct != null ? `<i style="transform:scaleX(${(d.pct / 100).toFixed(3)})"></i>` : '');
+}
+
 function refresh(k) {
   if (mode === 'compact' || k === 'shelf' || k === 'rec' || k === 'timer' || k === 'media' || k === 'dl') {
     const before = views.compact._html;
     renderCompact();
     if (mode === 'compact' && before !== views.compact._html) layout(CLOSE);
   }
+  if (k === 'dl') dlChip();
   if (mode !== 'panel') { panelDirty = true; return; }
   if (k === 'shelf') refreshTabs();
   if (k === 'clips') { if (mode === 'panel') refreshTabs(); if (tab === 'clip') { renderClipList(); const sw = $('.cbar .switch'); if (sw) sw.classList.toggle('on', S.clips.history); } return; }
@@ -1370,12 +1419,14 @@ function onNative(m) {
       break;
     case 'settled': break;
     case 'dragDone': fileDrag = false; break;
-    case 'vanish': hidden = true; stage.classList.add('gone'); layout(CLOSE); break;
+    case 'vanish': hidden = true; stage.classList.add('gone'); if (mode === 'toast' && current) pauseToast(); layout(CLOSE); break;
     case 'appear':
       hidden = true; layout(CLOSE);
       for (const s of Object.values(sp)) s.set(s.t);
       hidden = false; stage.classList.remove('gone');
       layout([260, 20]);
+      if (mode === 'toast' && current && !hovering) resumeToast();
+      else if (mode === 'compact' && toasts.length) setTimeout(nextToast, 300);
       break;
   }
 }

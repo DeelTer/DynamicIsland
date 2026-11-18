@@ -285,14 +285,16 @@ sealed partial class IslandApp
                 });
             };
             p.EnableRaisingEvents = true;
-            p.Exited += (_, _) => island.BeginInvoke(() =>
+            // Exited can fire before the async stdout reader has delivered the last lines (the final
+            // file path). WaitForExit() without a timeout also waits for both streams to reach EOF.
+            p.Exited += (_, _) => Task.Run(() => { try { p.WaitForExit(); } catch (Exception) { } }).ContinueWith(_ => island.BeginInvoke(() =>
             {
                 bool cancelled = ytJob == null;
                 ytJob = null; ytProgress = null; PushDownloads();
                 if (finalPath != null && File.Exists(finalPath)) DownloadFinished(finalPath);
                 else if (!cancelled) Toast("error", "Не удалось скачать", Shorten(lastError ?? "yt-dlp завершился с ошибкой"), "warning-circle", "#ff6b6b", ms: 7000);
                 p.Dispose();
-            });
+            }));
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
         }

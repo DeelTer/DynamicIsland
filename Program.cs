@@ -66,6 +66,24 @@ static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        // An exception escaping an event handler or an async void continuation on the UI thread
+        // must not take the whole island down: log it and keep running.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) => CrashLog(e.Exception);
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) => { CrashLog(e.Exception); e.SetObserved(); };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog(e.ExceptionObject as Exception);
         Application.Run(new IslandApp());
+    }
+
+    internal static void CrashLog(Exception? error)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(Store.Folder);
+            string path = System.IO.Path.Combine(Store.Folder, "errors.log");
+            if (System.IO.File.Exists(path) && new System.IO.FileInfo(path).Length > 512_000) System.IO.File.Delete(path);
+            System.IO.File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {error}\n\n");
+        }
+        catch (Exception) { }
     }
 }

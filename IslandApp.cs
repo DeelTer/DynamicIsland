@@ -282,6 +282,7 @@ sealed partial class IslandApp : ApplicationContext
             case "dragStart": StartDrag(); break;
             case "volume": Native.MediaKey(m.GetProperty("dir").GetInt32() > 0 ? (byte)0xAF : (byte)0xAE); break;
             case "pasteLast": PasteLast(); break;
+            case "jsError": Program.CrashLog(new Exception("JS: " + Str(m, "text"))); break;
             case "mediaMenu": MediaMenu(); break;
             case "ytGet": StartYt(Str(m, "url"), Str(m, "q")); break;
             case "ytInstall": InstallTools(); break;

@@ -112,11 +112,13 @@ sealed partial class IslandApp
 
     void OnDownloadFile(string path)
     {
+        Log($"dl created {Path.GetFileName(path)}");
         if (IsPartial(path) && !downloads.ContainsKey(path)) downloads[path] = (0, DateTime.UtcNow, 0);
     }
 
     void OnDownloadRenamed(string from, string to)
     {
+        Log($"dl rename {Path.GetFileName(from)} -> {Path.GetFileName(to)} tracked={downloads.ContainsKey(from)}");
         if (downloads.Remove(from)) { }
         if (IsPartial(to)) { downloads[to] = (0, DateTime.UtcNow, 0); return; }
         // Partial file renamed to its final name → finished.
@@ -134,9 +136,15 @@ sealed partial class IslandApp
             if (!info.Exists)
             {
                 downloads.Remove(path);
-                // Firefox deletes the .part and writes the final file next to it.
+                // The rename event can be missed (watcher overflow, browser writing via a temp name):
+                // the finished file is then the same name without the partial extension, or failing
+                // that the newest real file that appeared in Downloads a moment ago.
                 string final = path[..^Path.GetExtension(path).Length];
-                if (File.Exists(final) && (DateTime.Now - File.GetLastWriteTime(final)).TotalSeconds < 10) DownloadFinished(final);
+                if (!File.Exists(final) || (DateTime.Now - File.GetLastWriteTime(final)).TotalSeconds > 20)
+                    final = new DirectoryInfo(Path.GetDirectoryName(path)!).EnumerateFiles()
+                        .Where(f => !IsPartial(f.FullName) && (DateTime.Now - f.LastWriteTime).TotalSeconds < 20)
+                        .OrderByDescending(f => f.LastWriteTime).FirstOrDefault()?.FullName ?? "";
+                if (final.Length > 0) DownloadFinished(final);
                 continue;
             }
             var (size, at, speed) = downloads[path];
@@ -168,9 +176,16 @@ sealed partial class IslandApp
         Patch("dl", payload);
     }
 
+    readonly Dictionary<string, DateTime> finishedRecently = new(StringComparer.OrdinalIgnoreCase);
+
     void DownloadFinished(string path)
     {
+        Log($"dl finished {Path.GetFileName(path)} exists={File.Exists(path)} dup={finishedRecently.ContainsKey(path)}");
         if (!File.Exists(path)) return;
+        // Rename event, poll fallback and yt-dlp can all report the same file — toast once.
+        var now = DateTime.UtcNow;
+        foreach (var old in finishedRecently.Where(f => (now - f.Value).TotalSeconds > 60).Select(f => f.Key).ToList()) finishedRecently.Remove(old);
+        if (!finishedRecently.TryAdd(path, now)) return;
         string name = Path.GetFileName(path);
         var size = new FileInfo(path).Length;
         string sub = size >= 1 << 20 ? $"{size / 1048576.0:0.#} МБ" : $"{Math.Max(1, size / 1024)} КБ";
@@ -194,6 +209,7 @@ sealed partial class IslandApp
     long notifyLastId = -1;
     DateTime notifyBurstAt;
     int notifyBurst;
+    bool notifyBusy;
 
     static string NotifyDb => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "Windows", "Notifications", "wpndatabase.db");
 
@@ -261,10 +277,16 @@ sealed partial class IslandApp
 
     async void CheckNotifications()
     {
-        if (notifyLastId < 0 || !state.Notify) return;
+        if (notifyLastId < 0 || !state.Notify || notifyBusy) return;
+        notifyBusy = true; // the file watcher and the fallback poll must not both report one message
         long after = notifyLastId;
-        var (last, items) = await Task.Run(() => QueryNotifications(after));
-        notifyLastId = Math.Max(notifyLastId, last);
+        List<Incoming> items;
+        try
+        {
+            (long last, items) = await Task.Run(() => QueryNotifications(after));
+            notifyLastId = Math.Max(notifyLastId, last);
+        }
+        finally { notifyBusy = false; }
         // Stay out of the way: nothing while hidden (games / fullscreen), dictating or picking.
         if (items.Count == 0 || shownMonitor <= 0 || recorder != null || picking) return;
         var now = DateTime.UtcNow;

@@ -103,7 +103,9 @@ sealed partial class IslandApp
                         reader.ReadBytes(bytes);
                         using var memory = new MemoryStream(bytes);
                         using var image = Image.FromStream(memory);
-                        art = DataUrl(CropSquare(image), 256, true);
+                        var square = CropSquare(image);
+                        art = DataUrl(square, 256, true);
+                        if (!ReferenceEquals(square, image)) square.Dispose();
                     }
                 }
             }
