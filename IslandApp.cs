@@ -283,6 +283,25 @@ sealed partial class IslandApp : ApplicationContext
             case "volume": Native.MediaKey(m.GetProperty("dir").GetInt32() > 0 ? (byte)0xAF : (byte)0xAE); break;
             case "pasteLast": PasteLast(); break;
             case "jsError": Program.CrashLog(new Exception("JS: " + Str(m, "text"))); break;
+            case "appsOrder":
+            {
+                var ids = m.GetProperty("ids").EnumerateArray().Select(x => x.GetString() ?? "").ToList();
+                var ordered = state.Apps.OrderBy(a => ids.IndexOf(a.Path) is var i && i < 0 ? int.MaxValue : i).ToList();
+                state.Apps.Clear(); state.Apps.AddRange(ordered);
+                state = state with { AppsManual = true };
+                Save(); PushApps();
+                break;
+            }
+            case "shelfOrder":
+            {
+                var ids = m.GetProperty("ids").EnumerateArray().Select(x => x.GetString() ?? "").ToList();
+                state = state with { Shelf = (state.Shelf ?? []).OrderBy(k => ids.IndexOf(k) is var i && i < 0 ? int.MaxValue : i).ToList() };
+                Save(); PushShelf();
+                break;
+            }
+            case "qr": QrPreview(Str(m, "text")); break;
+            case "qrCopy": QrCopy(Str(m, "text")); break;
+            case "qrShelf": QrShelf(Str(m, "text")); break;
             case "mediaMenu": MediaMenu(); break;
             case "ytGet": StartYt(Str(m, "url"), Str(m, "q")); break;
             case "ytInstall": InstallTools(); break;

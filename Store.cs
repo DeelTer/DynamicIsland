@@ -11,7 +11,7 @@ public record Shortcut(string Path, int Count = 0);
 public record State(List<Clip> Clips, List<Shortcut> Apps, List<string> Games, bool History = false,
     string Note = "", List<string>? Shelf = null, string? AnchorMonitor = null, double AnchorX = 0.5,
     bool HoverOpen = true, List<string>? Colors = null, string? Fx = null,
-    bool Notify = true, bool NotifyText = true);
+    bool Notify = true, bool NotifyText = true, bool AppsManual = false);
 
 static class Store
 {

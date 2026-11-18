@@ -274,7 +274,7 @@ function close() {
 function scheduleClose(delay = 340) {
   clearTimeout(leaveT);
   leaveT = setTimeout(() => {
-    if (!hovering && !pinned && !typing() && !dragging && !fileDrag) close();
+    if (!hovering && !pinned && !typing() && !dragging && !fileDrag && !sortDrag) close();
   }, delay);
 }
 const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && document.hasFocus(); };
@@ -476,7 +476,7 @@ function flash(text) {
 
 // ------------------------------------------------------------------ panel
 
-const TABS = [['home', 'house', 'Главная'], ['clip', 'clipboard-text', 'Буфер'], ['note', 'note-pencil', 'Заметка'], ['timer', 'timer', 'Таймер'], ['fx', 'currency-circle-dollar', 'Валюты']];
+const TABS = [['home', 'house', 'Главная'], ['clip', 'clipboard-text', 'Буфер'], ['note', 'note-pencil', 'Заметка'], ['timer', 'timer', 'Таймер'], ['fx', 'currency-circle-dollar', 'Валюты'], ['qr', 'qr-code', 'QR']];
 const tabCount = id => id === 'clip' && S.clips.items.length ? `<span class="count">${S.clips.items.length}</span>` : '';
 
 function renderPanel() {
@@ -548,6 +548,7 @@ function pageHtml() {
   if (tab === 'note') return noteHtml();
   if (tab === 'timer') return timerHtml();
   if (tab === 'fx') return fxHtml();
+  if (tab === 'qr') return qrHtml();
   return '';
 }
 
@@ -724,6 +725,74 @@ function parseDuration(text) {
   return found ? total : 0;
 }
 
+// ------------------------------------------------------------------ QR generator
+// Text or Wi-Fi network → live QR preview (rendered natively by ZXing) → copy as image / put on the shelf.
+const QR = { mode: 'text', text: '', ssid: '', pass: '', hidden: false, image: null, error: null, seeded: false };
+const qrEscape = s => s.replace(/([\\;,:"])/g, '\\$1');
+function qrPayload() {
+  if (QR.mode === 'wifi') return QR.ssid ? `WIFI:T:${QR.pass ? 'WPA' : 'nopass'};S:${qrEscape(QR.ssid)};${QR.pass ? `P:${qrEscape(QR.pass)};` : ''}${QR.hidden ? 'H:true;' : ''};` : '';
+  return QR.text.trim();
+}
+function qrHtml() {
+  if (!QR.seeded) {
+    // First visit: start from a link you just copied.
+    QR.seeded = true;
+    const link = S.clips.items.find(c => c.kind === 'Ссылки');
+    if (!QR.text && link) QR.text = link.text;
+  }
+  const form = QR.mode === 'wifi'
+    ? `<label class="qf">Сеть (SSID)<input id="qssid" autocomplete="off" spellcheck="false" value="${esc(QR.ssid)}" placeholder="MyWiFi"></label>
+       <label class="qf">Пароль<input id="qpass" autocomplete="off" spellcheck="false" value="${esc(QR.pass)}" placeholder="пусто — открытая сеть"></label>`
+    : `<textarea id="qtext" spellcheck="false" placeholder="Текст или ссылка…">${esc(QR.text)}</textarea>`;
+  return `<div class="qrl">
+      <div class="seg">${[['text', 'text-t', 'Текст'], ['wifi', 'wifi-high', 'Wi-Fi']].map(([m, i, l]) =>
+        `<button class="${QR.mode === m ? 'on' : ''}" data-act="qrMode:${m}">${ic(i, 15)}${l}</button>`).join('')}</div>
+      ${form}
+      <div class="qhint">${QR.mode === 'wifi' ? 'Наведите камеру телефона — он подключится к сети сам.' : 'Код обновляется по мере ввода. До 2000 символов.'}</div>
+    </div>
+    <div class="qrr">
+      <div class="qcard ${QR.image ? '' : 'empty'}" id="qcard">${QR.image ? `<img src="${QR.image}" draggable="false">` : ic('qr-code', 64)}</div>
+      <div class="qerr">${esc(QR.error || '')}</div>
+      <div class="qacts">
+        <button class="btn primary" data-act="qrCopy" ${QR.image ? '' : 'disabled'}>${ic('copy', 16)}Копировать</button>
+        <button class="btn" data-act="qrShelf" ${QR.image ? '' : 'disabled'} title="Сохранить PNG на полку">${ic('tray', 16)}</button>
+      </div>
+    </div>`;
+}
+let qrT = 0, qrSent = null;
+function qrUpdate(now) {
+  clearTimeout(qrT);
+  qrT = setTimeout(() => {
+    const payload = qrPayload();
+    if (payload === qrSent) return;
+    qrSent = payload;
+    if (!payload) { QR.image = null; QR.error = null; qrRender(); return; }
+    post({ t: 'qr', text: payload });
+    if (!native) { QR.image = null; QR.error = 'Предпросмотр доступен в приложении'; qrRender(); }
+  }, now ? 0 : 140);
+}
+function qrRender() {
+  const card = $('#qcard');
+  if (!card) return;
+  card.classList.toggle('empty', !QR.image);
+  const img = card.querySelector('img');
+  if (QR.image && img) { img.src = QR.image; card.animate([{ transform: 'scale(.97)' }, { transform: 'none' }], { duration: 220, easing: 'cubic-bezier(.34,1.4,.5,1)' }); }
+  else card.innerHTML = QR.image ? `<img src="${QR.image}" draggable="false">` : ic('qr-code', 64);
+  $('.qerr').textContent = QR.error || '';
+  for (const b of document.querySelectorAll('.qacts .btn')) b.disabled = !QR.image;
+}
+function wireQr(page) {
+  if (!page.querySelector('.qrl')) return;
+  const bind = (sel, key) => {
+    const el = page.querySelector(sel);
+    if (!el) return;
+    el.addEventListener('input', () => { QR[key] = el.value; qrUpdate(); });
+    el.addEventListener('focus', () => post({ t: 'focus' }));
+  };
+  bind('#qtext', 'text'); bind('#qssid', 'ssid'); bind('#qpass', 'pass');
+  qrSent = null; qrUpdate(true);
+}
+
 // ------------------------------------------------------------------ audio output popover
 function showAudio(list) {
   const page = $('#page'), card = $('.media');
@@ -805,6 +874,7 @@ function fxParse(text) {
 }
 function fxOrdered() {
   const p = fxPrefs();
+  if (p.manual) return [...p.list]; // the user arranged the tiles by hand
   return [...p.list].sort((a, b) => (p.use[b] || 0) - (p.use[a] || 0) || p.list.indexOf(a) - p.list.indexOf(b));
 }
 
@@ -815,11 +885,13 @@ function fxHtml() {
       <span class="code">${c}</span>${fxBadge(c)}
       <span class="x" data-act="fxRemove" data-code="${c}" title="Убрать">${ic('x', 10)}</span></label>`).join('');
   const when = FX.at ? new Date(FX.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-  return `<div class="fxgrid" id="fxgrid">${rows}
+  return `<div class="fxgrid ${fxArrange ? 'arranging' : ''}" id="fxgrid">${rows}
       <button class="fxrow add" data-act="fxAdd">${ic('plus', 16)}Валюта</button></div>
     <div class="fxfoot">
       <span>${FX.error ? 'Нет связи — курсы от ' + (when || '—') : FX.rates ? 'Курсы Coinbase · ' + when : 'Загружаю курсы…'}</span>
-      <span class="spacer"></span><span class="hint">можно писать 1500*3 или 2к</span>
+      <span class="spacer"></span><span class="hint">${fxArrange ? 'перетащите плитки' : 'можно писать 1500*3 или 2к'}</span>
+      ${fxPrefs().manual && fxArrange ? `<button class="btn ghost" data-act="fxAuto" title="Снова сортировать по частоте">По частоте</button>` : ''}
+      <button class="btn ghost ${fxArrange ? 'on' : ''}" data-act="fxArrange" title="Поменять плитки местами (или удерживайте плитку)">${ic(fxArrange ? 'check' : 'dots-six-vertical', 16)}${fxArrange ? 'Готово' : ''}</button>
       <button class="btn ghost round" data-act="fxRefresh" title="Обновить курсы">${ic('arrows-clockwise', 16)}</button>
     </div>
     ${FX.picker ? fxPickerHtml() : ''}`;
@@ -907,6 +979,7 @@ function fxAct(act, el) {
 
 function wirePage(page) {
   wireFx(page);
+  wireQr(page);
   const note = page.querySelector('#note');
   if (note) {
     note.value = S.note || '';
@@ -1029,6 +1102,11 @@ function act(name, el, e) {
       if ($('#apop')) $('#apop').remove(); else post({ t: 'audioList' });
       break;
     case 'audioSet': post({ t: 'audioSet', id: el.dataset.id }); $('#apop')?.remove(); flash('Звук → ' + el.dataset.name); break;
+    case 'qrMode': QR.mode = arg; renderPage(false); break;
+    case 'qrCopy': if (QR.image) post({ t: 'qrCopy', text: qrPayload() }); break;
+    case 'qrShelf': if (QR.image) post({ t: 'qrShelf', text: qrPayload() }); break;
+    case 'fxArrange': fxArrange = !fxArrange; renderPage(false); break;
+    case 'fxAuto': fxPrefs().manual = false; fxSave(); fxArrange = false; renderPage(false); break;
     case 'fxAdd': case 'fxClose': case 'fxPick': case 'fxRemove': case 'fxRefresh':
       e?.preventDefault(); e?.stopPropagation(); fxAct(cmd, el); break;
     case 'shelfRemove': e.stopPropagation(); post({ t: 'shelfRemove', id: el.dataset.id }); break;
@@ -1118,6 +1196,100 @@ function updateMedia(fromUser) {
   if (fromUser) bounce(card);
   tickPage();
 }
+
+// ------------------------------------------------------------------ long-press reorder
+// Hold a tile ~0.4 s (or use the arrange button in currencies) → it lifts and follows the pointer;
+// neighbours glide out of the way (FLIP). A quick drag still means "drag the file out" on the shelf.
+const SORTABLE = [
+  { sel: '#fxgrid > .fxrow:not(.add)', key: el => el.dataset.code, done: ids => { const p = fxPrefs(); p.list = ids; p.manual = true; fxSave(); } },
+  { sel: '#dock > .app:not(.add)', key: el => el.dataset.id, done: ids => post({ t: 'appsOrder', ids }) },
+  { sel: '#sitems > .sitem', key: el => el.dataset.file, done: ids => post({ t: 'shelfOrder', ids }) }
+];
+let sortPress = null, sortDrag = null, fxArrange = false;
+
+document.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || sortDrag) return;
+  for (const s of SORTABLE) {
+    const item = e.target.closest(s.sel);
+    if (!item) continue;
+    if (e.target.closest('.x, .cact')) return;
+    sortPress = { s, item, x: e.clientX, y: e.clientY, id: e.pointerId };
+    if (fxArrange && s === SORTABLE[0]) { e.preventDefault(); startSort(e); }
+    else sortPress.t = setTimeout(() => sortPress && startSort(sortPress.last || e), 380);
+    item.classList.add('pressing');
+    return;
+  }
+}, true);
+
+function startSort(e) {
+  const { s, item } = sortPress;
+  clearTimeout(sortPress.t);
+  item.classList.remove('pressing');
+  fdown = down = null; // not a file drag, not an island drag
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  const r = item.getBoundingClientRect();
+  sortDrag = { s, item, dx: sortPress.x - r.left, dy: sortPress.y - r.top, moved: false };
+  sortPress = null;
+  try { item.setPointerCapture(e.pointerId); } catch { }
+  item.classList.add('lifting');
+  item.parentElement.classList.add('sorting');
+  moveSort(e.clientX ?? r.left + sortDrag.dx, e.clientY ?? r.top + sortDrag.dy);
+}
+
+function moveSort(x, y) {
+  const { item, s } = sortDrag;
+  const parent = item.parentElement;
+  const others = [...parent.querySelectorAll(':scope > *')].filter(el => el !== item && el.matches(s.sel));
+  // Find the sibling under the pointer by its layout box (offsets ignore the FLIP transforms that
+  // are still gliding neighbours into place) and move our tile before/after it.
+  const pr = parent.getBoundingClientRect();
+  const px = x - pr.left + parent.scrollLeft - parent.clientLeft, py = y - pr.top + parent.scrollTop - parent.clientTop;
+  const box = el => { const o = el.offsetParent === parent ? el : null; return o ? { l: el.offsetLeft, t: el.offsetTop } : { l: el.getBoundingClientRect().left - pr.left + parent.scrollLeft, t: el.getBoundingClientRect().top - pr.top + parent.scrollTop }; };
+  const hit = others.find(el => { const b = box(el); return px >= b.l && px <= b.l + el.offsetWidth && py >= b.t && py <= b.t + el.offsetHeight; });
+  if (hit) {
+    const before = new Map(others.map(el => [el, el.getBoundingClientRect()]));
+    const all = [...parent.children];
+    parent.insertBefore(item, all.indexOf(item) < all.indexOf(hit) ? hit.nextSibling : hit);
+    for (const el of others) {
+      const a = before.get(el), b = el.getBoundingClientRect();
+      if (Math.abs(a.left - b.left) + Math.abs(a.top - b.top) < 1) continue;
+      el.animate([{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px)` }, { transform: 'none' }],
+        { duration: 260, easing: 'cubic-bezier(.22,1,.36,1)' });
+    }
+    sortDrag.moved = true;
+  }
+  item.style.transform = 'none';
+  const base = item.getBoundingClientRect();
+  item.style.transform = `translate(${x - sortDrag.dx - base.left}px, ${y - sortDrag.dy - base.top}px) scale(1.06)`;
+}
+
+document.addEventListener('pointermove', e => {
+  if (sortDrag) { e.preventDefault(); moveSort(e.clientX, e.clientY); return; }
+  if (!sortPress) return;
+  sortPress.last = e;
+  // Moving before the hold completes cancels it (lets a quick drag-out or a scroll happen).
+  if (Math.hypot(e.clientX - sortPress.x, e.clientY - sortPress.y) > 6) { clearTimeout(sortPress.t); sortPress.item.classList.remove('pressing'); sortPress = null; }
+}, true);
+
+function endSort() {
+  if (sortPress) { clearTimeout(sortPress.t); sortPress.item.classList.remove('pressing'); sortPress = null; }
+  if (!sortDrag) return;
+  const { item, s, moved } = sortDrag;
+  sortDrag = null;
+  const from = item.style.transform;
+  item.style.transform = '';
+  item.classList.remove('lifting');
+  item.parentElement?.classList.remove('sorting');
+  item.animate([{ transform: from }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.34,1.4,.5,1)' });
+  suppressClick = true; setTimeout(() => { suppressClick = false; }, 60);
+  // The click that follows the drop must not launch the app / focus the currency input.
+  const eat = ev => { ev.preventDefault(); ev.stopPropagation(); };
+  addEventListener('click', eat, { capture: true, once: true });
+  setTimeout(() => removeEventListener('click', eat, true), 80);
+  if (moved) s.done([...item.parentElement.querySelectorAll(':scope > *')].filter(el => el.matches(s.sel)).map(s.key));
+}
+document.addEventListener('pointerup', endSort, true);
+document.addEventListener('pointercancel', endSort, true);
 
 document.addEventListener('click', e => {
   if (suppressClick) { suppressClick = false; return; }
@@ -1403,6 +1575,7 @@ function onNative(m) {
       if (mode === 'panel' && tab === 'fx') { if (FX.picker || typing()) fxFill(document.activeElement); else renderPage(false); }
       break;
     case 'lvl': pushLevel(m.v); break;
+    case 'qr': if (m.text === qrPayload()) { QR.image = m.image; QR.error = m.error; qrRender(); } break;
     case 'mediaMenu': if ($('#ymenu')) showYMenu(m.data); break;
     case 'audio': showAudio(m.list); break;
     case 'ratesError': FX.error = true; if (mode === 'panel' && tab === 'fx' && !typing() && !FX.picker) renderPage(false); break;

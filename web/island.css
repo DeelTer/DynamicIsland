@@ -343,7 +343,8 @@ body.demo { background: linear-gradient(135deg, #3b6fd6, #5b3cc4 45%, #b0607a); 
 .timer { display: grid; grid-template-columns: 250px 1fr; gap: 14px; }
 .ring { position: relative; display: grid; place-items: center; }
 .ring svg { position: absolute; }
-.ring .val { font-size: 42px; font-weight: 600; letter-spacing: -.5px; }
+.ring > div { text-align: center; }
+.ring .val { font-size: 42px; font-weight: 600; letter-spacing: -.5px; text-align: center; font-variant-numeric: tabular-nums; }
 .ring .lbl { font-size: 12px; color: var(--muted); text-align: center; margin-top: -2px; }
 .ring circle { transition: stroke .3s; }
 .presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-content: start; }
@@ -584,3 +585,46 @@ body.demo { background: linear-gradient(135deg, #3b6fd6, #5b3cc4 45%, #b0607a); 
 .dlchip i { position: absolute; left: 0; bottom: 0; width: 100%; height: 2px; background: #4aa3ff; transform-origin: 0 50%; transition: transform .4s ease; }
 /* file names: two lines max, break anywhere (no spaces in names) */
 #toast .dlthumb + .txt .title { -webkit-line-clamp: 2; word-break: break-all; }
+
+/* long-press reorder */
+.pressing { transition: transform .38s cubic-bezier(.3,.7,.3,1) !important; transform: scale(.96) !important; }
+.lifting {
+  position: relative; z-index: 20 !important; transition: none !important; cursor: grabbing !important;
+  box-shadow: 0 16px 34px -10px rgba(0,0,0,.85), 0 0 0 1.5px rgba(255,255,255,.22) !important;
+  background: rgba(60,60,64,.96) !important; pointer-events: none;
+}
+.sorting > :not(.lifting) { transition: background .15s; }
+.fxgrid.arranging .fxrow:not(.add) { cursor: grab; animation: jiggle .32s ease-in-out infinite alternate; }
+.fxgrid.arranging .fxrow:nth-child(2n):not(.add) { animation-delay: -.16s; }
+.fxgrid.arranging .fxrow input { pointer-events: none; }
+@keyframes jiggle { from { rotate: -.6deg; } to { rotate: .6deg; } }
+.fxfoot .btn.on { color: #34d399; }
+
+/* QR generator */
+.page.qr { display: grid; grid-template-columns: 1fr 260px; gap: 14px; }
+.qrl { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.qrl .seg { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; border-radius: 12px; background: var(--tile); }
+.qrl .seg button { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--muted); transition: background .2s, color .2s; }
+.qrl .seg button.on { background: rgba(255,255,255,.12); color: var(--ink); }
+.qrl textarea {
+  flex: 1; min-height: 0; resize: none; border: 0; outline: 0; border-radius: var(--r-l); padding: 14px 16px;
+  background: var(--tile); color: var(--ink); font: inherit; font-size: 14px; line-height: 1.45;
+  box-shadow: inset 0 0 0 1.5px transparent; transition: box-shadow .2s;
+}
+.qrl textarea:focus, .qf input:focus { box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.22); }
+.qf { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.qf input { height: 44px; border: 0; outline: 0; border-radius: 12px; padding: 0 14px; background: var(--tile); color: var(--ink); font: inherit; font-size: 14px; font-weight: 500; transition: box-shadow .2s; }
+.qhint { font-size: 12px; color: var(--faint); }
+.qrr { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.qcard {
+  width: 230px; height: 230px; border-radius: 22px; background: #fff; display: grid; place-items: center; overflow: hidden;
+  box-shadow: 0 18px 40px -16px rgba(0,0,0,.8); transition: background .3s;
+}
+.qcard img { width: 100%; height: 100%; image-rendering: pixelated; }
+.qcard.empty { background: var(--tile); color: var(--faint); box-shadow: none; }
+.qerr { min-height: 15px; font-size: 12px; color: #ff6b6b; text-align: center; }
+.qacts { display: flex; gap: 8px; width: 230px; }
+.qacts .btn.primary { flex: 1; justify-content: center; }
+.qacts .btn:disabled { opacity: .4; pointer-events: none; }
+/* offsetLeft/Top of sortable tiles are measured against their own container */
+#fxgrid, #dock, #sitems { position: relative; }

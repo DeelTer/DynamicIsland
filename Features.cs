@@ -168,7 +168,8 @@ sealed partial class IslandApp
 
     // ---------------------------------------------------------------- apps
 
-    void PushApps() => Patch("apps", state.Apps.OrderByDescending(a => a.Count).Take(12)
+    // Hand-arranged dock keeps its order; otherwise the most launched apps come first.
+    void PushApps() => Patch("apps", (state.AppsManual ? state.Apps.AsEnumerable() : state.Apps.OrderByDescending(a => a.Count)).Take(12)
         .Select(a => new { id = a.Path, name = Path.GetFileNameWithoutExtension(a.Path), icon = IconUrl(a.Path) }).ToList());
 
     void AddApp()

@@ -318,6 +318,54 @@ sealed partial class IslandApp
         }
     }
 
+    // ---------------------------------------------------------------- QR generator
+
+    /// UTF-8 (Cyrillic-safe) QR code, black on white with a quiet zone, crisp at any size.
+    internal static Bitmap? QrBitmap(string text, int size)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 2000) return null;
+        var writer = new ZXing.BarcodeWriterPixelData
+        {
+            Format = ZXing.BarcodeFormat.QR_CODE,
+            Options = new ZXing.QrCode.QrCodeEncodingOptions
+            {
+                Width = size, Height = size, Margin = 2, CharacterSet = "UTF-8",
+                ErrorCorrection = ZXing.QrCode.Internal.ErrorCorrectionLevel.M
+            }
+        };
+        var data = writer.Write(text);
+        var bitmap = new Bitmap(data.Width, data.Height, PixelFormat.Format32bppRgb);
+        var bits = bitmap.LockBits(new Rectangle(0, 0, data.Width, data.Height), ImageLockMode.WriteOnly, PixelFormat.Format32bppRgb);
+        try { Marshal.Copy(data.Pixels, 0, bits.Scan0, data.Pixels.Length); }
+        finally { bitmap.UnlockBits(bits); }
+        return bitmap;
+    }
+
+    void QrPreview(string text)
+    {
+        try
+        {
+            using var qr = QrBitmap(text, 360);
+            island.Send(new { t = "qr", text, image = qr == null ? null : DataUrl(qr, 360), error = text.Length > 2000 ? "Слишком длинный текст (до 2000 символов)" : null });
+        }
+        catch (Exception) { island.Send(new { t = "qr", text, image = (string?)null, error = "Не получилось построить код" }); }
+    }
+
+    void QrCopy(string text)
+    {
+        using var qr = QrBitmap(text, 720);
+        if (qr == null) return;
+        try { System.Windows.Forms.Clipboard.SetImage(qr); ownSequence = Native.GetClipboardSequenceNumber(); island.Send(new { t = "flash", text = "QR-код в буфере" }); }
+        catch (Exception) { island.Send(new { t = "flash", text = "Буфер занят" }); }
+    }
+
+    void QrShelf(string text)
+    {
+        using var qr = QrBitmap(text, 720);
+        if (qr == null) return;
+        island.Send(new { t = "flash", text = AddShelfBitmap(qr, "QR " + DateTime.Now.ToString("HH.mm.ss") + ".png") != null ? "QR-код на полке" : "Полка заполнена" });
+    }
+
     // ---------------------------------------------------------------- image analysis results
 
     /// Screenshots: OCR + QR before the toast so it can offer "copy text" / "open link".

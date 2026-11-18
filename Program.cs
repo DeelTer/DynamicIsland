@@ -36,7 +36,11 @@ static class Program
                 g.DrawImage(qrBitmap, 660, 140);
             }
             var result = Vision.Analyze(image).GetAwaiter().GetResult();
-            System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "vision-check.txt"), $"QR: {result.Qr}\nOCR:\n{result.Text}\n");
+            const string sample = "Привет, мир! WIFI:T:WPA;S:Дом;P:пароль123;;";
+            using var generated = IslandApp.QrBitmap(sample, 360)!;
+            var roundTrip = Vision.Analyze(generated).GetAwaiter().GetResult();
+            System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "vision-check.txt"),
+                $"QR: {result.Qr}\nOCR:\n{result.Text}\nGenerated QR round trip ok: {roundTrip.Qr == sample}\n");
             return;
         }
         if (args.Contains("--url-check")) // diagnostics: can the browser address bar be read? (host only)
