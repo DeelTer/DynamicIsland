@@ -282,6 +282,11 @@ sealed partial class IslandApp : ApplicationContext
             case "dragStart": StartDrag(); break;
             case "volume": Native.MediaKey(m.GetProperty("dir").GetInt32() > 0 ? (byte)0xAF : (byte)0xAE); break;
             case "pasteLast": PasteLast(); break;
+            case "mediaMenu": MediaMenu(); break;
+            case "ytGet": StartYt(Str(m, "url"), Str(m, "q")); break;
+            case "ytInstall": InstallTools(); break;
+            case "ytCancel": CancelYt(); break;
+            case "ytSearch": SearchYoutube(Str(m, "q")); break;
             case "audioList": PushAudio(); break;
             case "audioSet":
                 try { AudioDevices.SetDefault(Str(m, "id")); } catch (Exception) { Toast("error", "Не удалось переключить", "", "warning-circle", "#ff6b6b"); }

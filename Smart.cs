@@ -154,8 +154,8 @@ sealed partial class IslandApp
     void PushDownloads()
     {
         var active = downloads.Where(d => d.Value.Size > 0).ToList();
-        object? payload = null;
-        if (active.Count > 0)
+        object? payload = ytProgress;
+        if (payload == null && active.Count > 0)
         {
             var main = active.OrderByDescending(d => d.Value.Speed).First();
             string name = Path.GetFileNameWithoutExtension(main.Key);

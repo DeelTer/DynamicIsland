@@ -135,15 +135,36 @@ static class Uia
     [ComImport, Guid("30CBE57D-D9D0-452A-AB13-7AC5AC4825EE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IUIAutomation
     {
-        void CompareElements(); void CompareRuntimeIds(); void GetRootElement(); void ElementFromHandle(); void ElementFromPoint();
+        void CompareElements(); void CompareRuntimeIds(); void GetRootElement();
+        [PreserveSig] int ElementFromHandle(nint window, out IUIAutomationElement element);
+        void ElementFromPoint();
         [PreserveSig] int GetFocusedElement(out IUIAutomationElement element);
+        void GetRootElementBuildCache(); void ElementFromHandleBuildCache(); void ElementFromPointBuildCache(); void GetFocusedElementBuildCache();
+        void CreateTreeWalker(); void ControlViewWalker(); void ContentViewWalker(); void RawViewWalker();
+        void RawViewCondition(); void ControlViewCondition(); void ContentViewCondition(); void CreateCacheRequest();
+        void CreateTrueCondition(); void CreateFalseCondition();
+        [PreserveSig] int CreatePropertyCondition(int property, [MarshalAs(UnmanagedType.Struct)] object value, [MarshalAs(UnmanagedType.IUnknown)] out object condition);
     }
 
     [ComImport, Guid("D22108AA-8AC5-49A5-837B-37BBB3D7591E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IUIAutomationElement
     {
-        void SetFocus(); void GetRuntimeId(); void FindFirst(); void FindAll(); void FindFirstBuildCache(); void FindAllBuildCache(); void BuildUpdatedCache();
+        void SetFocus(); void GetRuntimeId();
+        [PreserveSig] int FindFirst(int scope, [MarshalAs(UnmanagedType.IUnknown)] object condition, out IUIAutomationElement found);
+        void FindAll(); void FindFirstBuildCache(); void FindAllBuildCache(); void BuildUpdatedCache();
         [PreserveSig] int GetCurrentPropertyValue(int property, out object value);
+    }
+
+    const int ValueValue = 30045, TreeScopeDescendants = 4;
+
+    /// Text of the first edit box in a browser window — the address bar (toolbar precedes page content).
+    public static string? AddressBar(nint window)
+    {
+        var automation = (IUIAutomation)new CUIAutomation();
+        if (automation.ElementFromHandle(window, out var root) != 0 || root == null) return null;
+        if (automation.CreatePropertyCondition(ControlType, Edit, out var condition) != 0) return null;
+        if (root.FindFirst(TreeScopeDescendants, condition, out var edit) != 0 || edit == null) return null;
+        return edit.GetCurrentPropertyValue(ValueValue, out var value) == 0 ? value as string : null;
     }
 
     const int ControlType = 30003, IsPassword = 30019, IsTextPattern = 30040, IsValuePattern = 30043, ValueReadOnly = 30046;

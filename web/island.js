@@ -335,8 +335,9 @@ function renderCompact() {
      <div class="side"><span class="muted num" data-k="clock"></span></div>`;
   else if (a === 'dl') html =
     `<div class="side dl" style="color:#4aa3ff"><span class="dl-ico">${ic('download-simple', 17)}</span>${S.dl.count > 1 ? `<span class="badge">${S.dl.count}</span>` : ''}</div>
-     <span class="time num" style="color:#8cc8ff">${size(S.dl.bytes)}</span>
-     <div class="side"><span class="muted num">${S.dl.speed > 0 ? size(S.dl.speed) + '/с' : '…'}</span></div>`;
+     <span class="time num" style="color:#8cc8ff">${S.dl.pct != null ? Math.floor(S.dl.pct) + '%' + (S.dl.part ? ' · ' + S.dl.part : '') : S.dl.bytes ? size(S.dl.bytes) : '…'}</span>
+     <div class="side"><span class="muted num">${S.dl.speed > 0 ? size(S.dl.speed) + '/с' : ''}</span></div>
+     ${S.dl.pct != null ? `<i class="dlbar" style="transform:scaleX(${(S.dl.pct / 100).toFixed(3)})"></i>` : ''}`;
   else if (a === 'media') html =
     `<div class="side">${S.art ? `<img class="art" src="${S.art}">` : `<span style="color:${S.artColor};display:flex">${ic('music-notes', 18)}</span>`}${shelf}</div>
      <span class="time num" data-k="clock"></span>
@@ -983,6 +984,10 @@ function act(name, el, e) {
     case 'ack': ackTimer(); break;
     case 'pin': pinned = !pinned; el.classList.toggle('on', pinned); el.innerHTML = ic(pinned ? 'push-pin:fill' : 'push-pin', 19); break;
     case 'menu': post({ t: 'menu' }); break;
+    case 'ytGet': post({ t: 'ytGet', url: ymenu.data?.url || '', q: el.dataset.q }); $('#ymenu')?.remove(); flash('Скачиваю — прогресс в пилюле'); break;
+    case 'ytInstall': post({ t: 'ytInstall' }); showYMenu({ state: 'installing' }); break;
+    case 'ytCancel': post({ t: 'ytCancel' }); $('#ymenu')?.remove(); break;
+    case 'ytSearch': post({ t: 'ytSearch', q: el.dataset.q }); $('#ymenu')?.remove(); break;
     case 'audioList':
       e?.stopPropagation();
       if ($('#apop')) $('#apop').remove(); else post({ t: 'audioList' });
@@ -1118,8 +1123,47 @@ document.addEventListener('keydown', e => {
 
 document.addEventListener('contextmenu', e => {
   e.preventDefault();
-  if (mode === 'compact' && e.target.closest('#wrap')) { post({ t: 'pasteLast' }); pillPulse(); }
+  if (mode === 'compact' && e.target.closest('#wrap')) { post({ t: 'pasteLast' }); pillPulse(); return; }
+  // Media card (not its buttons / progress bar): download / find-on-YouTube menu.
+  const card = e.target.closest('.media');
+  if (mode === 'panel' && card && !card.classList.contains('empty') && !e.target.closest('.controls, .progress, .aout, button')) {
+    ymenu.x = e.clientX; ymenu.y = e.clientY;
+    showYMenu({ state: 'loading' });
+    post({ t: 'mediaMenu' });
+  }
 });
+
+// ------------------------------------------------------------------ media download menu
+const ymenu = { x: 0, y: 0, data: null };
+const QUALITY = { 4320: '8K', 2160: '4K', 1440: '2K', 1080: 'Full HD', 720: 'HD' };
+function showYMenu(d) {
+  const page = $('#page');
+  $('#ymenu')?.remove();
+  if (!page || mode !== 'panel' || tab !== 'home') return;
+  ymenu.data = d;
+  let body;
+  if (d.state === 'loading') body = `<div class="yhead"><span class="spin">${ic('arrow-counter-clockwise', 15)}</span>Ищу видео…</div>`;
+  else if (d.state === 'installing') body = `<div class="yhead"><span class="spin">${ic('arrow-counter-clockwise', 15)}</span>Устанавливаю yt-dlp и ffmpeg…</div><div class="ynote">Прогресс — в пилюле острова.</div>`;
+  else if (d.state === 'search') body = `<button class="aopt" data-act="ytSearch" data-q="${esc(d.query)}">${ic('magnifying-glass', 17)}<span>Найти на YouTube</span></button>
+      <div class="ynote">Скачивание доступно только для YouTube и SoundCloud.</div>`;
+  else if (d.state === 'install') body = `<div class="yhead">${ic('download-simple', 16)}Скачивание видео</div>
+      <div class="ynote">Нужны yt-dlp и ffmpeg (~115 МБ, официальные сборки с GitHub). Используйте для своего контента и того, что разрешено скачивать.</div>
+      <button class="aopt primary" data-act="ytInstall">${ic('download-simple', 17)}<span>Установить</span></button>`;
+  else if (d.state === 'busy') body = `<div class="yhead">${ic('download-simple', 16)}<span class="ell">${esc(d.title || 'Загрузка')}</span></div>
+      <button class="aopt" data-act="ytCancel">${ic('x', 17)}<span>Отменить загрузку</span></button>`;
+  else if (d.state === 'error') body = `<div class="ynote">${esc(d.message)}</div>`;
+  else if (d.state === 'ready') body = `<div class="yhead" title="${esc(d.title)}">${ic('download-simple', 16)}<span class="ell">${d.searched ? 'Найдено: ' : ''}${esc(d.title)}</span></div>
+      ${d.heights.map(h => `<button class="aopt" data-act="ytGet" data-q="${h}"><b class="q">${h}p</b><span>${QUALITY[h] || ''}</span>${ic('video-camera', 16)}</button>`).join('')}
+      <button class="aopt" data-act="ytGet" data-q="audio"><b class="q">MP3</b><span>Только звук</span>${ic('music-notes', 16)}</button>`;
+  const el = document.createElement('div');
+  el.id = 'ymenu'; el.className = 'apop ymenu';
+  el.innerHTML = body;
+  page.appendChild(el);
+  const p = page.getBoundingClientRect();
+  el.style.left = Math.max(4, Math.min(ymenu.x - p.left, p.width - el.offsetWidth - 4)) + 'px';
+  el.style.top = Math.max(4, Math.min(ymenu.y - p.top, p.height - el.offsetHeight - 4)) + 'px';
+}
+document.addEventListener('pointerdown', e => { if (!e.target.closest?.('#ymenu')) $('#ymenu')?.remove(); }, true);
 
 // Pill gestures: wheel = volume, middle click = play/pause, right click = paste the last copied item.
 let wheelAt = 0;
@@ -1310,6 +1354,7 @@ function onNative(m) {
       if (mode === 'panel' && tab === 'fx') { if (FX.picker || typing()) fxFill(document.activeElement); else renderPage(false); }
       break;
     case 'lvl': pushLevel(m.v); break;
+    case 'mediaMenu': if ($('#ymenu')) showYMenu(m.data); break;
     case 'audio': showAudio(m.list); break;
     case 'ratesError': FX.error = true; if (mode === 'panel' && tab === 'fx' && !typing() && !FX.picker) renderPage(false); break;
     case 'toast': showToast(m); break;

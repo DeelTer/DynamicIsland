@@ -39,6 +39,11 @@ static class Program
             System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "vision-check.txt"), $"QR: {result.Qr}\nOCR:\n{result.Text}\n");
             return;
         }
+        if (args.Contains("--url-check")) // diagnostics: can the browser address bar be read? (host only)
+        {
+            System.IO.File.WriteAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "url-check.txt"), IslandApp.UrlProbe());
+            return;
+        }
         if (args.Contains("--notify-check")) // diagnostics: parse the last messenger notifications (no content printed)
         {
             var report = IslandApp.NotifyProbe();
