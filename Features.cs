@@ -696,6 +696,7 @@ sealed partial class IslandApp
         }
         try { AddClip(secret ? new Clip("Текст", Store.Protect(value), Secret: true) : new Clip(Store.Classify(value), value)); }
         catch (Exception) { } // DPAPI unavailable: better to drop the secret than to store it in plain text
+        if (!secret) TtcClipboard(value);
     }
 
     static bool SameClip(Clip a, Clip b) =>

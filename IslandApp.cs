@@ -53,6 +53,7 @@ sealed partial class IslandApp : ApplicationContext
         StartDownloadWatch();
         Task.Run(CleanThumbs);
         StartNotifyWatch();
+        StartTikTokBridge();
         tick.Tick += (_, _) => Tick();
         tick.Start();
         noteSave.Tick += (_, _) => { noteSave.Stop(); Save(); };
@@ -440,6 +441,7 @@ sealed partial class IslandApp : ApplicationContext
 
     void ToastAction(string id)
     {
+        if (TtcAction(id)) return;
         if (id == "timer5") StartTimer(5);
         else if (id.StartsWith("timer:") && int.TryParse(id[6..], out int minutes)) StartTimer(minutes);
         else if (id == "shelfFolder") Process.Start(new ProcessStartInfo("explorer.exe", "\"" + Path.Combine(Store.Folder, "shelf") + "\"") { UseShellExecute = true });
