@@ -21,6 +21,12 @@ static class Program
                 !Store.LooksSecret("привет") && !Store.LooksSecret("hello world 1A!") && !Store.LooksSecret("https://ex.com/A1b!") &&
                 !Store.LooksSecret("+7 (999) 123-45-67") && !Store.LooksSecret("18.11.2026") && !Store.LooksSecret("me@mail.ru") &&
                 !Store.LooksSecret("C:\\Users\\A1!") && !Store.LooksSecret("Island") &&
+                // seed phrases (test vectors, not real wallets)
+                Store.LooksSecret("abandon ability able about above absent absorb abstract absurd abuse access accident") &&
+                Store.LooksSecret("1. legal 2. winner 3. thank 4. year 5. wave 6. sausage 7. worth 8. useful 9. legal 10. winner 11. thank 12. yellow") &&
+                Store.LooksSecret("zoo zebra zero zone youth young yellow year yard wrong write wrist\nworth world work word wool wood wolf wise wire winter wing wine") &&
+                !Store.LooksSecret("this is just a normal english sentence that has twelve words in it") &&
+                !Store.LooksSecret("привет как дела что нового у тебя сегодня было хорошо или нет") &&
                 Store.Plain(new Clip("Текст", Store.Protect("Xk9#mPq2vL!"), Secret: true)) == "Xk9#mPq2vL!" &&
                 Store.Mask("Xk9#mPq2vL!") == "Xk•••••••••";
             Environment.Exit(ok ? 0 : 1);

@@ -78,6 +78,7 @@ static class Store
     /// Single token, 6–128 chars, at least three of lower / upper / digit / symbol, not a URL, mail or path.
     public static bool LooksSecret(string value)
     {
+        if (LooksSeedPhrase(value)) return true;
         if (value.Length is < 6 or > 128 || value.Any(char.IsWhiteSpace)) return false;
         if (value.Contains("://") || value.StartsWith("www.", StringComparison.OrdinalIgnoreCase) || value.Contains('\\') ||
             System.Text.RegularExpressions.Regex.IsMatch(value, @"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase) ||
@@ -85,6 +86,23 @@ static class Store
         int classes = (value.Any(char.IsLower) ? 1 : 0) + (value.Any(char.IsUpper) ? 1 : 0) + (value.Any(char.IsDigit) ? 1 : 0) +
                       (value.Any(c => !char.IsLetterOrDigit(c)) ? 1 : 0);
         return classes >= 3;
+    }
+
+    // Crypto wallet recovery phrase: BIP39 (12/15/18/21/24 words), Electrum (12/13), Monero (25).
+    // Lowercase latin words of 3-8 letters, optionally numbered ("1. word" / "1) word"), any separators.
+    // Deliberately loose: a false positive only hides a line of text in the history, a miss leaks a wallet.
+    public static bool LooksSeedPhrase(string value)
+    {
+        if (value.Length is < 36 or > 400) return false;
+        var tokens = System.Text.RegularExpressions.Regex.Split(value.Trim(), @"[\s,;]+")
+            .Where(t => !System.Text.RegularExpressions.Regex.IsMatch(t, @"^\d{1,2}[.)]?$")) // drop "1." / "1)" / "1"
+            .Select(t => System.Text.RegularExpressions.Regex.Replace(t, @"^\d{1,2}[.)]", "")) // "1.word"
+            .Where(t => t.Length > 0).ToArray();
+        if (tokens.Length is not (12 or 13 or 15 or 18 or 21 or 24 or 25)) return false;
+        if (!tokens.All(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[a-z]{3,8}$"))) return false;
+        // ordinary English sentences reuse short function words; seed words are (almost) all distinct
+        string[] common = { "the", "and", "for", "you", "that", "this", "with", "are", "was", "have", "not", "but", "from", "they", "will", "your", "what", "can", "has", "its" };
+        return tokens.Count(common.Contains) <= 1 && tokens.Distinct().Count() * 3 >= tokens.Length * 2;
     }
 
     public static string Classify(string value)
