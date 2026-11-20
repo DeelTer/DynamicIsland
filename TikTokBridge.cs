@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 
 namespace Island;
 
-// Add-on bridge to TikTokChecker (a separate app that serves a tiny API on 127.0.0.1:47821).
+// Add-on bridge to Retenta (a separate app that serves a tiny API on 127.0.0.1:47821).
 // Island polls its event feed and shows toasts; a TikTok/Shorts link copied to the clipboard
-// can be sent to TikTokChecker straight from the toast. Nothing happens while TikTokChecker is closed.
+// can be sent to Retenta straight from the toast. Nothing happens while Retenta is closed.
 sealed partial class IslandApp
 {
     const string TtcBase = "http://127.0.0.1:47821";
@@ -53,7 +53,7 @@ sealed partial class IslandApp
     void TtcToast(JsonElement e)
     {
         string kind = e.GetProperty("kind").GetString() ?? "";
-        string title = e.GetProperty("title").GetString() ?? "TikTokChecker";
+        string title = e.GetProperty("title").GetString() ?? "Retenta";
         string sub = e.GetProperty("sub").GetString() ?? "";
         string? key = e.TryGetProperty("key", out var k) && k.ValueKind == JsonValueKind.String ? k.GetString() : null;
         island.BeginInvoke(() =>
@@ -70,7 +70,7 @@ sealed partial class IslandApp
         bool running = status.GetProperty("running").GetBoolean();
         string? stage = running ? $"{status.GetProperty("done").GetInt32()}/{status.GetProperty("total").GetInt32()}" : null;
         if (running && ttcLastStage == null)
-            island.BeginInvoke(() => Toast("ttc", "TikTokChecker разбирает ролики", "Island сообщит, когда будет готово", "waveform", "#ff5d8f", ms: 3000));
+            island.BeginInvoke(() => Toast("ttc", "Retenta разбирает ролики", "Island сообщит, когда будет готово", "waveform", "#ff5d8f", ms: 3000));
         ttcLastStage = stage;
     }
 
@@ -79,7 +79,7 @@ sealed partial class IslandApp
     {
         text = text.Trim();
         if (!ttcOnline || text.Length > 400 || !TtcLink.IsMatch(text)) return;
-        Toast("ttc", "Ссылка на ролик", "Разобрать в TikTokChecker?", "video-camera", "#ff5d8f",
+        Toast("ttc", "Ссылка на ролик", "Разобрать в Retenta?", "video-camera", "#ff5d8f",
             [Act("ttc:add:" + text, "Разобрать", "waveform", primary: true)], ms: 7000);
     }
 
